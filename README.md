@@ -197,33 +197,61 @@ Warning at line 2, column 10: Unknown setting: custom_setting
 Run the built-in test suite:
 
 ```bash
-python overpass_ql_syntax_checker.py --test
+overpass-ql-check --test
+```
+
+Or run the comprehensive test suite:
+
+```bash
+python -m pytest tests/
+# or directly
+python tests/test_package.py
 ```
 
 The test suite includes:
+
 - 20+ test cases covering various syntax scenarios
 - Valid query validation
 - Invalid query detection with specific error types
 - Edge cases and malformed input handling
+- Complex real-world query testing
 
 ## Architecture
 
 ### OverpassQLLexer
-- Converts source code into tokens
-- Handles all OverpassQL literals, operators, and keywords
-- Provides detailed position tracking for error reporting
-- Supports Unicode escape sequences and proper string handling
 
-### OverpassQLParser  
+- Converts source code into tokens
+- Handles string literals, numbers, identifiers
+- Supports comments and escape sequences
+- Provides detailed position information
+
+### OverpassQLParser
+
 - Recursive descent parser for OverpassQL grammar
-- Validates syntax structure and semantics
-- Generates detailed error and warning messages
+- Validates syntax against official specification
+- Generates detailed error messages with position info
 - Supports all OverpassQL language constructs
 
-### OverpassQLSyntaxChecker
-- Main interface class
+### Main Interface
+
+- OverpassQLSyntaxChecker class provides the main API
 - Combines lexer and parser functionality
-- Provides both programmatic API and CLI interface
+- Returns structured results with errors and warnings
+- Simple validation methods for easy integration
+
+## References
+
+- [Overpass API/Overpass QL - OpenStreetMap Wiki](https://wiki.openstreetmap.org/wiki/Overpass_API/Overpass_QL)
+- [Overpass API Language Guide](https://wiki.openstreetmap.org/wiki/Overpass_API/Language_Guide)
+- [Overpass Turbo](https://overpass-turbo.eu/) - Online query builder and tester
+
+## Development
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+MIT License - Feel free to use, modify, and distribute.
 
 ## Language Reference
 
