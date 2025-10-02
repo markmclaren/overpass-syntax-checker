@@ -1251,8 +1251,8 @@ class OverpassQLParser:
                         r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
                     ):
                         self.error(
-                            f"Invalid date format in changed filter: {
-                                second_date.value}"
+                            "Invalid date format in changed filter: "
+                            + second_date.value
                         )
             else:
                 # Other filters like newer:"date", user:"name", uid:123
