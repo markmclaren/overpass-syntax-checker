@@ -3,13 +3,13 @@
 Test the Overpass QL Syntax Checker with complex real-world queries.
 """
 
-from overpass_ql_syntax_checker import OverpassQLSyntaxChecker
+from overpass_ql_checker import OverpassQLSyntaxChecker
 
 
 def test_complex_queries():
     """Test complex real-world Overpass QL queries."""
     checker = OverpassQLSyntaxChecker()
-    
+
     # Complex real-world queries
     queries = [
         # 1. Restaurant query with area and union
@@ -25,9 +25,8 @@ def test_complex_queries():
             );
             out center;
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 2. Public transport query with multiple filters
         {
             "name": "Public Transport in Bounding Box",
@@ -41,9 +40,8 @@ def test_complex_queries():
             );
             out geom;
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 3. Around query with recursion
         {
             "name": "Amenities Around Point with Recursion",
@@ -56,9 +54,8 @@ def test_complex_queries():
             (._;>;);
             out;
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 4. Historical data query
         {
             "name": "Historical OSM Data",
@@ -67,9 +64,8 @@ def test_complex_queries():
             node[amenity=restaurant](50.0,7.0,51.0,8.0);
             out meta;
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 5. Complex regex and tag filters
         {
             "name": "Complex Tag Filtering",
@@ -78,9 +74,8 @@ def test_complex_queries():
             node[~"^addr:.*$"~".*"][name~"Hotel.*", i][tourism=hotel];
             out;
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 6. Foreach loop example
         {
             "name": "Foreach Loop",
@@ -92,9 +87,8 @@ def test_complex_queries():
               out;
             }
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 7. CSV output with custom fields
         {
             "name": "CSV Output",
@@ -103,9 +97,8 @@ def test_complex_queries():
             node[amenity=restaurant](50.0,7.0,51.0,8.0);
             out;
             """,
-            "should_pass": True
+            "should_pass": True,
         },
-        
         # 8. Error: Missing semicolon
         {
             "name": "Missing Semicolon",
@@ -114,9 +107,8 @@ def test_complex_queries():
             node[amenity=restaurant]
             out;
             """,
-            "should_pass": False
+            "should_pass": False,
         },
-        
         # 9. Error: Invalid regex
         {
             "name": "Invalid Regex",
@@ -125,9 +117,8 @@ def test_complex_queries():
             node[name~"[invalid"];
             out;
             """,
-            "should_pass": False
+            "should_pass": False,
         },
-        
         # 10. Error: Invalid coordinates
         {
             "name": "Invalid Coordinates",
@@ -136,23 +127,23 @@ def test_complex_queries():
             node(200.0,-200.0,91.0,181.0);
             out;
             """,
-            "should_pass": False
-        }
+            "should_pass": False,
+        },
     ]
-    
+
     print("Testing Complex Overpass QL Queries")
     print("=" * 60)
-    
+
     passed = 0
     total = len(queries)
-    
+
     for i, test in enumerate(queries, 1):
         print(f"\n--- Test {i}: {test['name']} ---")
-        
-        result = checker.check_syntax(test['query'])
-        is_valid = result['valid']
-        should_pass = test['should_pass']
-        
+
+        result = checker.check_syntax(test["query"])
+        is_valid = result["valid"]
+        should_pass = test["should_pass"]
+
         if is_valid == should_pass:
             print("✅ PASS")
             passed += 1
@@ -160,25 +151,25 @@ def test_complex_queries():
             print("❌ FAIL")
             if should_pass:
                 print(f"Expected: VALID, Got: INVALID")
-                if result['errors']:
+                if result["errors"]:
                     print("Errors:")
-                    for error in result['errors'][:3]:  # Show first 3 errors
+                    for error in result["errors"][:3]:  # Show first 3 errors
                         print(f"  • {error}")
             else:
                 print(f"Expected: INVALID, Got: VALID")
-        
+
         # Show first few tokens for complex queries
-        if len(test['query'].strip()) > 100:
-            tokens = result.get('tokens', [])
+        if len(test["query"].strip()) > 100:
+            tokens = result.get("tokens", [])
             if tokens:
                 print(f"Tokens (first 10): {', '.join(tokens[:10])}")
-    
-    print(f"\n{'='*60}")
-    print(f"Complex Query Tests: {passed}/{total} passed ({passed/total*100:.1f}%)")
-    
+
+    print(f"\n{'=' * 60}")
+    print(f"Complex Query Tests: {passed}/{total} passed ({passed / total * 100:.1f}%)")
+
     return passed == total
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = test_complex_queries()
     exit(0 if success else 1)

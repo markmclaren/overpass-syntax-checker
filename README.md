@@ -1,5 +1,9 @@
 # Overpass QL Syntax Checker
 
+[![PyPI version](https://badge.fury.io/py/overpass-ql-checker.svg)](https://badge.fury.io/py/overpass-ql-checker)
+[![Python Support](https://img.shields.io/pypi/pyversions/overpass-ql-checker.svg)](https://pypi.org/project/overpass-ql-checker/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL), used to query OpenStreetMap data through the Overpass API.
 
 ## Features
@@ -23,11 +27,15 @@ A comprehensive Python syntax checker for the Overpass Query Language (OverpassQ
 
 - **Detailed error reporting** - Provides specific error messages with line and column numbers
 - **Warning system** - Identifies potential issues and deprecated usage
-- **Built-in test suite** - Comprehensive tests covering valid and invalid queries
+- **Zero dependencies** - Uses only Python standard library
+- **Type hints** - Full type annotation support
+- **Modern packaging** - Follows Python packaging best practices
 
 ## Installation
 
-Simply download the `overpass_ql_syntax_checker.py` file. No external dependencies required - uses only Python standard library.
+```bash
+pip install overpass-ql-checker
+```
 
 ## Usage
 
@@ -35,22 +43,22 @@ Simply download the `overpass_ql_syntax_checker.py` file. No external dependenci
 
 ```bash
 # Check a query string directly
-python overpass_ql_syntax_checker.py "node[amenity=restaurant];out;"
+overpass-ql-check "node[amenity=restaurant];out;"
 
 # Check a query from file
-python overpass_ql_syntax_checker.py -f my_query.overpass
+overpass-ql-check -f my_query.overpass
 
 # Verbose output with tokens and detailed information
-python overpass_ql_syntax_checker.py -v "node[amenity=cafe];out;"
+overpass-ql-check -v "node[amenity=cafe];out;"
 
 # Run built-in test suite
-python overpass_ql_syntax_checker.py --test
+overpass-ql-check --test
 ```
 
 ### Python API
 
 ```python
-from overpass_ql_syntax_checker import OverpassQLSyntaxChecker
+from overpass_ql_checker import OverpassQLSyntaxChecker
 
 # Create checker instance
 checker = OverpassQLSyntaxChecker()
@@ -70,7 +78,24 @@ result = checker.check_syntax(query)
 print(f"Valid: {result['valid']}")
 print(f"Errors: {result['errors']}")
 print(f"Warnings: {result['warnings']}")
+print(f"Tokens: {len(result['tokens'])}")
 ```
+
+## API Reference
+
+### OverpassQLSyntaxChecker
+
+Main class for syntax checking.
+
+#### Methods
+
+- `check_syntax(query: str) -> Dict[str, Union[bool, List[str]]]`
+  - Returns detailed validation results
+  - Keys: `'valid'`, `'errors'`, `'warnings'`, `'tokens'`
+
+- `validate_query(query: str, verbose: bool = False) -> bool`
+  - Returns `True` if query is valid, `False` otherwise
+  - Prints results if `verbose=True`
 
 ## Supported OverpassQL Features
 
