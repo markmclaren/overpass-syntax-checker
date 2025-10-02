@@ -1548,8 +1548,8 @@ class OverpassQLSyntaxChecker:
 
         if verbose:
             print(
-                f"Query validation result: {
-                    'VALID' if result['valid'] else 'INVALID'}"
+                f"Query validation result: "
+                f"{'VALID' if result['valid'] else 'INVALID'}"
             )
             print(f"Errors: {len(result['errors'])}")
             print(f"Warnings: {len(result['warnings'])}")
