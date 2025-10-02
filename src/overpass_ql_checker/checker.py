@@ -657,7 +657,7 @@ class OverpassQLParser:
     """Parser for Overpass QL syntax checking."""
 
     # Valid output formats
-    OUTPUT_FORMATS = {"xml", "json", "csv", "custom", "popup", "opl", "pbf"}
+    OUTPUT_FORMATS = {"xml", "json", "csv", "custom", "popup", "opl", "pbf", "geojson"}
 
     # Valid out statement modes
     OUT_MODES = {"ids", "skel", "body", "tags", "meta"}
@@ -1170,11 +1170,15 @@ class OverpassQLParser:
 
     def _parse_around_coordinates(self) -> None:
         """Parse coordinates for around filter."""
-        # Special case: {{center}} template placeholder represents a lat,lng pair
+        # Special case: {{center}} and {{geocodeCoords:...}} template placeholders
+        # represent a lat,lng pair
         if self.match(TokenType.TEMPLATE_PLACEHOLDER):
             placeholder = self.current_token().value
-            if "center" in placeholder.lower():
-                self.advance()  # Skip the {{center}} placeholder
+            if (
+                "center" in placeholder.lower()
+                or "geocodecoords" in placeholder.lower()
+            ):
+                self.advance()  # Skip the template placeholder
                 return
 
         # Parse at least one coordinate pair
@@ -1390,6 +1394,10 @@ class OverpassQLParser:
         elif filter_name.lower() == "user" and self.match(TokenType.COLON):
             self.advance()  # Skip ':'
             self._parse_user_list_filter()
+        # Handle special case for uid filter with comma-separated list
+        elif filter_name.lower() == "uid" and self.match(TokenType.COLON):
+            self.advance()  # Skip ':'
+            self._parse_uid_list_filter()
         # Handle other filters with parameters
         elif self.match(TokenType.COLON):
             self.advance()
@@ -1459,6 +1467,21 @@ class OverpassQLParser:
                 else:
                     self.advance()
 
+    def _parse_uid_list_filter(self) -> None:
+        """Parse UID list filter."""
+        if not self.match(TokenType.NUMBER):
+            self.error("Expected UID after 'uid:'")
+        else:
+            self.advance()  # First UID
+
+            # Parse additional UIDs
+            while self.match(TokenType.COMMA):
+                self.advance()
+                if not self.match(TokenType.NUMBER):
+                    self.error("Expected UID in UID list")
+                else:
+                    self.advance()
+
     def _is_valid_date_or_template(self, date_value: str) -> bool:
         """Check if a string is a valid date format or template placeholder."""
         # Check for ISO date format
@@ -1477,43 +1500,67 @@ class OverpassQLParser:
 
         if self.match(TokenType.COLON):
             self.advance()  # Skip :
+            self._parse_identifier_filter_value(filter_name)
 
-            if filter_name.value.lower() == "id":
-                self._parse_id_list_filter()
-            elif filter_name.value.lower() == "changed":
-                # Handle changed filter with date range: changed:"date1","date2"
-                if not self.match(TokenType.STRING):
-                    self.error("Expected date string after 'changed:'")
-                    return
+    def _parse_identifier_filter_value(self, filter_name) -> None:
+        """Parse the value part of identifier filters after the colon."""
+        filter_name_lower = filter_name.value.lower()
 
-                first_date = self.advance()
-                # Validate date format
-                if not self._is_valid_date_or_template(first_date.value):
-                    self.error(
-                        f"Invalid date format in changed filter: {first_date.value}"
-                    )
+        if filter_name_lower == "id":
+            self._parse_id_list_filter()
+        elif filter_name_lower == "uid":
+            self._parse_uid_filter_value()
+        elif filter_name_lower == "changed":
+            self._parse_changed_filter_value()
+        else:
+            self._parse_generic_filter_value()
 
-                # Check for second date (range)
-                if self.match(TokenType.COMMA):
-                    self.advance()  # Skip comma
-
-                    if not self.match(TokenType.STRING):
-                        self.error(
-                            "Expected second date string after comma in changed filter"
-                        )
-                        return
-
-                    second_date = self.advance()
-                    # Validate second date format
-                    if not self._is_valid_date_or_template(second_date.value):
-                        self.error(
-                            "Invalid date format in changed filter: "
-                            + second_date.value
-                        )
-            else:
-                # Other filters like newer:"date", user:"name", uid:123
-                if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+    def _parse_uid_filter_value(self) -> None:
+        """Parse uid filter with multiple values: uid:123,456,789."""
+        if self.match(TokenType.NUMBER):
+            self.advance()
+            # Parse additional UIDs separated by commas
+            while self.match(TokenType.COMMA):
+                self.advance()  # Skip comma
+                if self.match(TokenType.NUMBER):
                     self.advance()
+                else:
+                    self.error("Expected number after comma in uid filter")
+                    break
+        else:
+            self.error("Expected number after 'uid:'")
+
+    def _parse_changed_filter_value(self) -> None:
+        """Parse changed filter with date range: changed:"date1","date2"."""
+        if not self.match(TokenType.STRING):
+            self.error("Expected date string after 'changed:'")
+            return
+
+        first_date = self.advance()
+        # Validate date format
+        if not self._is_valid_date_or_template(first_date.value):
+            self.error(f"Invalid date format in changed filter: {first_date.value}")
+
+        # Check for second date (range)
+        if self.match(TokenType.COMMA):
+            self.advance()  # Skip comma
+
+            if not self.match(TokenType.STRING):
+                self.error("Expected second date string after comma in changed filter")
+                return
+
+            second_date = self.advance()
+            # Validate second date format
+            if not self._is_valid_date_or_template(second_date.value):
+                self.error(
+                    "Invalid date format in changed filter: " + second_date.value
+                )
+
+    def _parse_generic_filter_value(self) -> None:
+        """Parse generic filter values for filters like newer, user, etc."""
+        # Other filters like newer:"date", user:"name", uid:123
+        if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+            self.advance()
 
     def parse_spatial_filter(self):
         """Parse spatial filter like (bbox) or (around:radius,lat,lng)."""
@@ -1965,6 +2012,9 @@ class OverpassQLParser:
                 # For FOR loops, parse evaluator like t["key"]
                 if block_type.type == TokenType.FOR:
                     self._parse_for_evaluator()
+                elif block_type.type == TokenType.IF:
+                    # Parse condition expression for if statements
+                    self._parse_condition_expression()
                 else:
                     # Parse evaluator expression (simplified for other blocks)
                     while not self.match(TokenType.RPAREN, TokenType.EOF):
@@ -1998,34 +2048,9 @@ class OverpassQLParser:
             self.expect(TokenType.RPAREN)
             return
 
-        # Handle t["key"] pattern and other complex expressions
-        if self.match(TokenType.IDENTIFIER):
-            self.advance()
-
-            # Parse tag filter part like ["key"] or function calls
-            if self.match(TokenType.LBRACKET):
-                self.advance()
-                if self.match(TokenType.STRING, TokenType.IDENTIFIER):
-                    self.advance()
-                else:
-                    self.error("Expected key name in for evaluator")
-                self.expect(TokenType.RBRACKET)
-            elif self.match(TokenType.LPAREN):
-                # Handle function calls in for evaluator
-                self.advance()  # Skip (
-                # Parse function arguments
-                while not self.match(TokenType.RPAREN, TokenType.EOF):
-                    if self.match(
-                        TokenType.STRING, TokenType.IDENTIFIER, TokenType.NUMBER
-                    ):
-                        self.advance()
-                    elif self.match(TokenType.COMMA):
-                        self.advance()
-                    else:
-                        break
-                self.expect(TokenType.RPAREN)
-        else:
-            self.error("Expected evaluator identifier in for loop")
+        # For complex expressions like string concatenation, use the condition
+        # expression parser
+        self._parse_condition_expression()
 
     def _parse_block_body(self) -> bool:
         """Parse block body and return whether braces were used."""
@@ -2065,6 +2090,102 @@ class OverpassQLParser:
                         break
                 self.expect(TokenType.RBRACE)
         return has_braces
+
+    def _parse_condition_expression(self) -> None:
+        """Parse condition expressions for if statements."""
+        # Simple expression parser that handles:
+        # - Function calls like count(nodes), count(ways), etc.
+        # - Arithmetic operations: +, -, *, /
+        # - Comparison operations: ==, !=, <, >, <=, >=
+        # - Logical operations: &&, ||
+        # - String concatenation with +
+
+        self._parse_logical_or_expression()
+
+    def _parse_logical_or_expression(self) -> None:
+        """Parse logical OR expressions."""
+        self._parse_logical_and_expression()
+
+        while self.match(TokenType.LOGICAL_OR):
+            self.advance()
+            self._parse_logical_and_expression()
+
+    def _parse_logical_and_expression(self) -> None:
+        """Parse logical AND expressions."""
+        self._parse_equality_expression()
+
+        while self.match(TokenType.LOGICAL_AND):
+            self.advance()
+            self._parse_equality_expression()
+
+    def _parse_equality_expression(self) -> None:
+        """Parse equality expressions (==, !=)."""
+        self._parse_relational_expression()
+
+        while self.match(TokenType.EQUAL_EQUAL, TokenType.NOT_EQUALS):
+            self.advance()
+            self._parse_relational_expression()
+
+    def _parse_relational_expression(self) -> None:
+        """Parse relational expressions (<, >, <=, >=)."""
+        self._parse_additive_expression()
+
+        while self.match(
+            TokenType.LESS_THAN,
+            TokenType.GREATER_THAN,
+            TokenType.LESS_EQUAL,
+            TokenType.GREATER_EQUAL,
+        ):
+            self.advance()
+            self._parse_additive_expression()
+
+    def _parse_additive_expression(self) -> None:
+        """Parse additive expressions (+, -)."""
+        self._parse_primary_expression()
+
+        while self.match(TokenType.PLUS, TokenType.MINUS):
+            self.advance()
+            self._parse_primary_expression()
+
+    def _parse_primary_expression(self) -> None:
+        """Parse primary expressions (identifiers, numbers, strings, function calls,
+        parenthesized expressions)."""
+        if self.match(TokenType.IDENTIFIER):
+            self.advance()
+
+            # Handle function calls
+            if self.match(TokenType.LPAREN):
+                self.advance()  # Skip (
+
+                # Parse function arguments
+                if not self.match(TokenType.RPAREN):
+                    self._parse_condition_expression()  # First argument
+                    while self.match(TokenType.COMMA):
+                        self.advance()
+                        self._parse_condition_expression()  # Additional arguments
+
+                self.expect(TokenType.RPAREN)
+
+            # Handle tag access like t["key"]
+            elif self.match(TokenType.LBRACKET):
+                self.advance()  # Skip [
+                if self.match(TokenType.STRING, TokenType.IDENTIFIER):
+                    self.advance()
+                else:
+                    self.error("Expected key name in tag access")
+                self.expect(TokenType.RBRACKET)
+
+        elif self.match(TokenType.NUMBER, TokenType.STRING):
+            self.advance()
+
+        elif self.match(TokenType.LPAREN):
+            self.advance()  # Skip (
+            self._parse_condition_expression()
+            self.expect(TokenType.RPAREN)
+
+        else:
+            # For unknown tokens, just advance to avoid infinite loops
+            self.advance()
 
     def parse_block_statement(self):
         """Parse block statements like if, foreach, for, etc."""
@@ -2350,17 +2471,35 @@ class OverpassQLParser:
         first_pair = True
         while (
             first_pair
-            and (self.match(TokenType.IDENTIFIER) or self.match(TokenType.STRING))
+            and (
+                self.match(TokenType.IDENTIFIER)
+                or self.match(TokenType.STRING)
+                or self.match(TokenType.COLON)
+            )
         ) or (not first_pair and self.match(TokenType.COMMA)):
             if not first_pair:
                 self.advance()  # Skip comma
             first_pair = False
 
-            # Parse key (can be string or identifier)
-            if not (self.match(TokenType.IDENTIFIER) or self.match(TokenType.STRING)):
+            # Parse key (can be string, identifier, or special ::identifier pattern)
+            if self.match(TokenType.COLON):
+                # Handle special ::identifier pattern
+                self.advance()  # Skip first :
+                if self.match(TokenType.COLON):
+                    self.advance()  # Skip second :
+                    if self.match(TokenType.IDENTIFIER):
+                        self.advance()  # Skip identifier part
+                    else:
+                        self.error("Expected identifier after '::'")
+                        return
+                else:
+                    self.error("Expected second ':' in :: pattern")
+                    return
+            elif self.match(TokenType.IDENTIFIER) or self.match(TokenType.STRING):
+                self.advance()
+            else:
                 self.error("Expected key in make statement")
                 return
-            self.advance()
 
             # Parse equals
             if not self.match(TokenType.EQUALS):
