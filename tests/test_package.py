@@ -6,13 +6,12 @@ Run with: python -m pytest tests/ (after installation)
 Or run directly: python tests/test_overpass_checker.py
 """
 
+from overpass_ql_checker import OverpassQLSyntaxChecker
 import os
 import sys
 
 # Add the source directory to the path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from overpass_ql_checker import OverpassQLSyntaxChecker
 
 
 def test_simple_valid_queries():
@@ -67,7 +66,8 @@ def test_complex_valid_queries():
 
     for query in complex_queries:
         result = checker.check_syntax(query)
-        assert result["valid"], f"Complex query should be valid: {query.strip()}"
+        assert result["valid"], f"Complex query should be valid: {
+            query.strip()}"
 
 
 def test_settings_validation():

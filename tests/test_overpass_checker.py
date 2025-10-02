@@ -4,15 +4,12 @@ Tests for the Overpass QL Syntax Checker package.
 This file contains comprehensive tests for the overpass-ql-checker library.
 """
 
+from overpass_ql_checker import OverpassQLSyntaxChecker
 import os
 import sys
 
-import pytest
-
 # Add the source directory to the path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from overpass_ql_checker import OverpassQLSyntaxChecker
 
 
 class TestOverpassQLSyntaxChecker:
@@ -34,7 +31,8 @@ class TestOverpassQLSyntaxChecker:
         for query in valid_queries:
             result = self.checker.check_syntax(query)
             assert result["valid"], f"Query should be valid: {query}"
-            assert len(result["errors"]) == 0, f"No errors expected for: {query}"
+            assert len(
+                result["errors"]) == 0, f"No errors expected for: {query}"
 
     def test_simple_invalid_queries(self):
         """Test simple invalid queries."""
@@ -78,7 +76,8 @@ class TestOverpassQLSyntaxChecker:
 
         for query in complex_queries:
             result = self.checker.check_syntax(query)
-            assert result["valid"], f"Complex query should be valid: {query.strip()}"
+            assert result["valid"], f"Complex query should be valid: {
+                query.strip()}"
 
     def test_settings_validation(self):
         """Test settings validation."""

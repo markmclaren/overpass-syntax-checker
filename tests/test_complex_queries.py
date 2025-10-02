@@ -150,13 +150,13 @@ def test_complex_queries():
         else:
             print("❌ FAIL")
             if should_pass:
-                print(f"Expected: VALID, Got: INVALID")
+                print("Expected: VALID, Got: INVALID")
                 if result["errors"]:
                     print("Errors:")
                     for error in result["errors"][:3]:  # Show first 3 errors
                         print(f"  • {error}")
             else:
-                print(f"Expected: INVALID, Got: VALID")
+                print("Expected: INVALID, Got: VALID")
 
         # Show first few tokens for complex queries
         if len(test["query"].strip()) > 100:
@@ -165,7 +165,8 @@ def test_complex_queries():
                 print(f"Tokens (first 10): {', '.join(tokens[:10])}")
 
     print(f"\n{'=' * 60}")
-    print(f"Complex Query Tests: {passed}/{total} passed ({passed / total * 100:.1f}%)")
+    print(
+        f"Complex Query Tests: {passed}/{total} passed ({passed / total * 100:.1f}%)")
 
     return passed == total
 

@@ -21,6 +21,7 @@ A comprehensive Python syntax checker for the Overpass Query Language (OverpassQ
 ## Features
 
 - **Complete lexical analysis** - Tokenizes Overpass QL source code with proper handling of:
+
   - String literals with escape sequences (including Unicode)
   - Numeric literals (integers, floats, scientific notation)
   - Comments (single-line `//` and multi-line `/* */`)
@@ -28,6 +29,7 @@ A comprehensive Python syntax checker for the Overpass Query Language (OverpassQ
   - Keywords and identifiers
 
 - **Comprehensive syntax validation** - Validates:
+
   - Settings statements (`[out:json][timeout:25]`)
   - Query statements (`node`, `way`, `rel`, `nwr`, `area`)
   - Tag filters (`[amenity=restaurant]`, `[name~"regex"]`)
@@ -74,16 +76,19 @@ pip install git+https://github.com/markmclaren/overpass-syntax-checker.git
 If the `overpass-ql-check` command is not found after installation:
 
 1. **Check if it's in your PATH:**
+
    ```bash
    which overpass-ql-check
    ```
 
 2. **Use the module directly:**
+
    ```bash
    python -m overpass_ql_checker.cli --test
    ```
 
 3. **Reinstall to refresh console scripts:**
+
    ```bash
    pip uninstall overpass-ql-checker
    pip install overpass-ql-checker  # or your preferred installation method
@@ -152,6 +157,7 @@ Main class for syntax checking.
 #### Methods
 
 - `check_syntax(query: str) -> Dict[str, Union[bool, List[str]]]`
+
   - Returns detailed validation results
   - Keys: `'valid'`, `'errors'`, `'warnings'`, `'tokens'`
 
@@ -162,22 +168,25 @@ Main class for syntax checking.
 ## Supported OverpassQL Features
 
 ### Settings
+
 - `[out:json|xml|csv|custom|popup]` - Output format
 - `[timeout:seconds]` - Query timeout
-- `[maxsize:bytes]` - Memory limit  
+- `[maxsize:bytes]` - Memory limit
 - `[bbox:south,west,north,east]` - Global bounding box
 - `[date:"YYYY-MM-DDTHH:MM:SSZ"]` - Historical data
 - `[diff:"date1","date2"]` - Difference queries
 
 ### Query Types
+
 - `node` - Query for nodes
-- `way` - Query for ways  
+- `way` - Query for ways
 - `rel`/`relation` - Query for relations
 - `nwr` - Query for nodes, ways, and relations
 - `nw`, `nr`, `wr` - Combined queries
 - `area` - Query for areas
 
 ### Filters
+
 - **Tag filters**: `[key]`, `[key=value]`, `[key!=value]`, `[!key]`
 - **Regex filters**: `[key~"regex"]`, `[~"key-regex"~"value-regex"]`
 - **Spatial filters**: `(bbox)`, `(around:radius,lat,lng)`, `(poly:"coords")`
@@ -188,6 +197,7 @@ Main class for syntax checking.
 - **User filters**: `(user:"name")`, `(uid:id)`
 
 ### Block Statements
+
 - **Union**: `(stmt1; stmt2;)`
 - **Difference**: `(stmt1; - stmt2;)`
 - **If conditions**: `if (evaluator) { ... } else { ... }`
@@ -197,37 +207,42 @@ Main class for syntax checking.
 - **Compare**: `compare (evaluator) { ... }`
 
 ### Output Statements
+
 - **Modes**: `ids`, `skel`, `body`, `tags`, `meta`, `count`
 - **Modifiers**: `geom`, `bb`, `center`, `asc`, `qt`, `noids`
 - **Limits**: `out 100;` (numeric limit)
 - **Bounding boxes**: `out geom(bbox);`
 
 ### Set Operations
+
 - **Assignment**: `query -> .setname;`
 - **Reference**: `.setname;`
 - **Input specification**: `node.setname[filter];`
 
 ### Recursion
+
 - `<` - Recurse up (find parents)
 - `<<` - Recurse up relations (with transitive closure)
-- `>` - Recurse down (find children) 
+- `>` - Recurse down (find children)
 - `>>` - Recurse down relations (with transitive closure)
 
 ## Examples
 
 ### Basic Restaurant Query
+
 ```overpassql
 [out:json][timeout:25];
 area[name="Berlin"]->.searchArea;
 (
   node(area.searchArea)[amenity=restaurant];
-  way(area.searchArea)[amenity=restaurant]; 
+  way(area.searchArea)[amenity=restaurant];
   relation(area.searchArea)[amenity=restaurant];
 );
 out center;
 ```
 
 ### Complex Query with Multiple Filters
+
 ```overpassql
 [out:json][bbox:52.5,13.3,52.6,13.5];
 (
@@ -238,6 +253,7 @@ out geom;
 ```
 
 ### Historical Data Query
+
 ```overpassql
 [out:json][date:"2020-01-01T00:00:00Z"];
 node[amenity=restaurant]({{bbox}});
@@ -338,7 +354,19 @@ flake8 src/ tests/ examples/
 # Auto-fix formatting issues
 black src/ tests/ examples/
 isort src/ tests/ examples/
+autopep8 --in-place --aggressive --aggressive src/ tests/ examples/ --recursive
 ```
+
+### Development Tools
+
+This project uses several code quality tools:
+
+- **black**: Code formatter for consistent Python style
+- **isort**: Import statement organizer and formatter
+- **flake8**: Linter for style guide enforcement and error detection
+- **autopep8**: Automatic PEP 8 compliance fixer for additional formatting issues
+- **mypy**: Static type checker for Python code
+- **pytest**: Testing framework with coverage reporting
 
 ### Building for Distribution
 
@@ -360,6 +388,7 @@ MIT License - Feel free to use, modify, and distribute.
 ## Language Reference
 
 Based on the official Overpass API documentation:
+
 - [Overpass API/Overpass QL - OpenStreetMap Wiki](https://wiki.openstreetmap.org/wiki/Overpass_API/Overpass_QL)
 - [OverpassQL Syntax Reference](https://osm-queries.ldodds.com/syntax-reference.html)
 - [Overpass API Source Code](https://github.com/drolbr/Overpass-API)

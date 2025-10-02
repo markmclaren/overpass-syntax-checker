@@ -14,13 +14,12 @@ Basic usage:
     result = checker.check_syntax("node[amenity=restaurant];out;")
 """
 
+from overpass_ql_checker import OverpassQLSyntaxChecker
 import os
 import sys
 
 # For development/testing - add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from overpass_ql_checker import OverpassQLSyntaxChecker
 
 
 def main():
