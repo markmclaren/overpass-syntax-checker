@@ -11,7 +11,7 @@
 > Feel free to test it out, but expect some changes before the stable release!
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Support](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python Support](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 ![Status](https://img.shields.io/badge/status-work--in--progress-orange.svg)
 [![Tests](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/test.yml/badge.svg)](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/test.yml)
 [![Code Quality](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/quality.yml/badge.svg)](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/quality.yml)
@@ -94,7 +94,7 @@ If the `overpass-ql-check` command is not found after installation:
 
 ### Requirements
 
-- Python 3.7 or higher
+- Python 3.10 or higher
 - No external dependencies (uses only Python standard library)
 
 > **Note**: This package will be published to PyPI in the future. Once published, you'll be able to install it with `pip install overpass-ql-checker`.

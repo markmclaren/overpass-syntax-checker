@@ -13,8 +13,9 @@ __author__ = "Mark McLaren"
 __email__ = "mark@example.com"  # Replace with your actual email
 __license__ = "MIT"
 
-from .checker import OverpassQLSyntaxChecker, Token, TokenType, ValidationResult
+from .checker import OverpassQLSyntaxChecker
 from .checker import SyntaxError as OverpassSyntaxError
+from .checker import Token, TokenType, ValidationResult
 
 __all__ = [
     "OverpassQLSyntaxChecker",
