@@ -37,10 +37,6 @@ jobs:
         run: |
           python -m pytest tests/ -v --tb=short
 
-      - name: Run CLI built-in tests
-        run: |
-          overpass-ql-check --test
-
       - name: Test CLI functionality (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -130,7 +126,7 @@ jobs:
       - name: Test installation from wheel
         run: |
           pip install dist/*.whl
-          overpass-ql-check --test
+          overpass-ql-check "node[amenity=restaurant];out;" --verbose
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

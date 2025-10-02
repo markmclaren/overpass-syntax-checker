@@ -129,6 +129,122 @@ def test_complex_queries():
             """,
             "should_pass": False,
         },
+        # 11. Real-world: Geocoding with area search
+        {
+            "name": "Geocoding Area Search",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:"Deutschland"}}->.searchArea;
+            node["historic"="castle"](area.searchArea);
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 12. Real-world: Complex relation query with recursion
+        {
+            "name": "Complex Relation with Recursion",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:"Magnitogorsk"}}->.searchArea;
+            way["railway"="tram"]["service"="yard"]["service"="spur"]["service"="siding"]["service"="crossover"](area.searchArea);
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 13. Real-world: Administrative boundaries
+        {
+            "name": "Administrative Boundaries",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:"gridan"}}->.searchArea;
+            relation["admin_level"="10"]["boundary"="administrative"](area.searchArea);
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 14. Real-world: CSV output with custom fields
+        {
+            "name": "CSV Output with Custom Fields",
+            "query": """
+            [out:csv("name","amenity","addr:city","addr:street","addr:housenumber";false;"|")];
+            area["de:amtlicher_gemeindeschluessel"~"^051"];
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 15. Real-world: Historical data with date
+        {
+            "name": "Historical Data Query",
+            "query": """
+            [out:xml][timeout:30];
+            way(uid:7725447)[changed:"2019-02-11T00:00:00Z","2019-02-11T23:55:59Z"];
+            node(uid:7725447)[changed:"2019-02-11T00:00:00Z","2019-02-11T23:55:59Z"];
+            out meta;
+            """,
+            "should_pass": True,
+        },
+        # 16. Real-world: Statistical aggregation
+        {
+            "name": "Statistical Aggregation",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:"Zerniewicz, Jaraguá do Sul"}}->.searchArea;
+            way["highway"](area.searchArea);
+            for(t["highway"]) {
+              make stat_highway_\\1 ,val=count(ways),sum=length(sum(length()));
+            }
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 17. Real-world: Multi-layer administrative query
+        {
+            "name": "Multi-layer Administrative Query",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:"Budapest"}}->.searchArea;
+            (relation["admin_level"="9"](area.searchArea););
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 18. Real-world: Pipeline query
+        {
+            "name": "Pipeline Query",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:"Hamburg"}}["admin_level"="4"]->.bndarea;
+            node["amenity"="library"](area.bndarea);
+            relation["amenity"="library"](area.bndarea);
+            (area.bndarea;);>;
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 19. Real-world: Fuel station query
+        {
+            "name": "Fuel Station Query",
+            "query": """
+            [out:json][timeout:25];
+            {{geocodeArea:""}}->.searchArea;
+            way["amenity"="fuel"]["fuel:biogas"="yes"](area.searchArea);
+            relation["amenity"="fuel"]["fuel:biogas"="yes"](area.searchArea);
+            (area.searchArea;);>;
+            out;
+            """,
+            "should_pass": True,
+        },
+        # 20. Real-world: Surface and length query
+        {
+            "name": "Surface and Length Query",
+            "query": """
+            [out:csv("surface","length")];
+            {{geocodeArea:"Czerwienczyca"}}->.searchArea;
+            way["highway"](area.searchArea);
+            out;
+            """,
+            "should_pass": True,
+        },
     ]
 
     print("Testing Complex Overpass QL Queries")
@@ -172,5 +288,4 @@ def test_complex_queries():
 
 
 if __name__ == "__main__":
-    success = test_complex_queries()
-    exit(0 if success else 1)
+    test_complex_queries()

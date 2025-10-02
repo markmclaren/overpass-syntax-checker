@@ -1,22 +1,11 @@
 # Overpass QL Syntax Checker
 
-> **🚧 Work in Progress**
->
-> This project is currently under active development. While the core functionality is working, we're still:
->
-> - Adding more comprehensive tests
-> - Fixing edge cases in syntax validation
-> - Preparing for PyPI publication
->
-> Feel free to test it out, but expect some changes before the stable release!
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Support](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-![Status](https://img.shields.io/badge/status-work--in--progress-orange.svg)
 [![Tests](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/test.yml/badge.svg)](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/test.yml)
 [![Code Quality](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/quality.yml/badge.svg)](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/quality.yml)
 
-A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL), used to query OpenStreetMap data through the Overpass API.
+A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL), used to query OpenStreetMap data through the Overpass API. Now with support for advanced features including **geocoding**, **statistical aggregation**, **temporal filtering**, and **complex pipeline operations**.
 
 ## Features
 
@@ -27,6 +16,7 @@ A comprehensive Python syntax checker for the Overpass Query Language (OverpassQ
   - Comments (single-line `//` and multi-line `/* */`)
   - All OverpassQL operators and punctuation
   - Keywords and identifiers
+  - Template placeholders with complex syntax support
 
 - **Comprehensive syntax validation** - Validates:
 
@@ -38,6 +28,22 @@ A comprehensive Python syntax checker for the Overpass Query Language (OverpassQ
   - Output statements (`out`, `out geom`, `out count`)
   - Set operations and assignments (`->.setname`)
   - Recursion operators (`<`, `<<`, `>`, `>>`)
+
+- **Advanced feature support** - Now includes:
+
+  - **Geocoding syntax**: `{{geocodeArea:"location"}}` with tag filters
+  - **Temporal filtering**: `[changed:"start","end"]` for historical queries
+  - **Statistical aggregation**: `make` statements with backslash references
+  - **Complex template expressions**: Template placeholders with assignments
+  - **Pipeline operations**: Complex query chaining and data processing
+
+- **Comprehensive test coverage** - 44 test scenarios including:
+
+  - 20+ complex real-world queries (Berlin restaurants, public transport, etc.)
+  - Historical data queries with temporal filtering
+  - Statistical aggregation and data processing
+  - Geocoding and area-based queries
+  - Error detection and edge cases
 
 - **Detailed error reporting** - Provides specific error messages with line and column numbers
 - **Warning system** - Identifies potential issues and deprecated usage
@@ -118,8 +124,8 @@ overpass-ql-check -f my_query.overpass
 # Verbose output with tokens and detailed information
 overpass-ql-check -v "node[amenity=cafe];out;"
 
-# Run built-in test suite
-overpass-ql-check --test
+# Check version
+overpass-ql-check --version
 ```
 
 ### Python API
@@ -189,12 +195,21 @@ Main class for syntax checking.
 
 - **Tag filters**: `[key]`, `[key=value]`, `[key!=value]`, `[!key]`
 - **Regex filters**: `[key~"regex"]`, `[~"key-regex"~"value-regex"]`
+- **Temporal filters**: `[changed:"date"]`, `[changed:"start","end"]`
 - **Spatial filters**: `(bbox)`, `(around:radius,lat,lng)`, `(poly:"coords")`
 - **Identity filters**: `(id:123)`, `(id:1,2,3)`
 - **Area filters**: `(area)`, `(area.setname)`, `(area:id)`
 - **Member filters**: `(w)`, `(r)`, `(bn)`, `(bw)`, `(br)`
 - **Date filters**: `(newer:"date")`, `(changed:"date")`
 - **User filters**: `(user:"name")`, `(uid:id)`
+
+### Advanced Features
+
+- **Template placeholders**: `{{bbox}}`, `{{geocodeArea:"location"}}`
+- **Geocoding with filters**: `{{geocodeArea:"Hamburg"}}["admin_level"="4"]`
+- **Statistical aggregation**: `make` statements with backslash references
+- **Complex loops**: `for(t["key"])` with statistical operations
+- **Pipeline operations**: Complex query chaining and data processing
 
 ### Block Statements
 
@@ -260,6 +275,48 @@ node[amenity=restaurant]({{bbox}});
 out;
 ```
 
+### Advanced Query Examples
+
+#### Geocoding with Area Search
+
+```overpassql
+[out:json][timeout:25];
+{{geocodeArea:"Deutschland"}}->.searchArea;
+node["historic"="castle"](area.searchArea);
+out;
+```
+
+#### Temporal Filtering
+
+```overpassql
+[out:xml][timeout:30];
+way(uid:7725447)[changed:"2019-02-11T00:00:00Z","2019-02-11T23:55:59Z"];
+out meta;
+```
+
+#### Statistical Aggregation
+
+```overpassql
+[out:json][timeout:25];
+{{geocodeArea:"Hamburg"}}->.searchArea;
+way["highway"](area.searchArea);
+for(t["highway"]) {
+  make stat_highway_\1 ,val=count(ways),sum=length(sum(length()));
+}
+out;
+```
+
+#### Pipeline Query with Template Placeholders
+
+```overpassql
+[out:json][timeout:25];
+{{geocodeArea:"Hamburg"}}["admin_level"="4"]->.bndarea;
+node["amenity"="library"](area.bndarea);
+relation["amenity"="library"](area.bndarea);
+(area.bndarea;);>;
+out;
+```
+
 ## Error Handling
 
 The syntax checker provides detailed error messages:
@@ -272,27 +329,37 @@ Warning at line 2, column 10: Unknown setting: custom_setting
 
 ## Testing
 
-Run the built-in test suite:
+Run the comprehensive test suite:
 
 ```bash
-overpass-ql-check --test
-```
+# Run all tests with pytest
+python -m pytest tests/ -v
 
-Or run the comprehensive test suite:
+# Run tests using the test script
+./test.sh
 
-```bash
-python -m pytest tests/
-# or directly
+# Or run individual test modules
+python tests/test_complex_queries.py
+python tests/test_overpass_checker.py
 python tests/test_package.py
 ```
 
 The test suite includes:
 
-- 20+ test cases covering various syntax scenarios
-- Valid query validation
-- Invalid query detection with specific error types
-- Edge cases and malformed input handling
-- Complex real-world query testing
+- **44 comprehensive test scenarios** covering all syntax features
+- **20 complex real-world queries** including:
+  - Berlin restaurants with area search and union operations
+  - Public transport queries with multiple filters
+  - Amenities around points with recursion
+  - Historical OSM data with temporal filtering
+  - Complex tag filtering with regex patterns
+  - Geocoding area searches
+  - Statistical aggregation with `for` loops and `make` statements
+  - Pipeline queries with template placeholders
+- **Valid query validation** with advanced feature support
+- **Invalid query detection** with specific error types
+- **Edge cases and malformed input handling**
+- **Cross-platform compatibility** (Linux, macOS, Windows)
 
 ## Architecture
 
@@ -323,6 +390,14 @@ The test suite includes:
 - [Overpass API Language Guide](https://wiki.openstreetmap.org/wiki/Overpass_API/Language_Guide)
 - [Overpass Turbo](https://overpass-turbo.eu/) - Online query builder and tester
 
+## Test Data Attribution
+
+Additional real-world test cases in this project include queries derived from the OverpassNL dataset:
+
+- **OverpassNL Dataset**: [GitHub Repository](https://github.com/varunlmxd/OverpassNL) - A comprehensive collection of natural language to OverpassQL query pairs used for research and testing purposes.
+
+These test cases help ensure the syntax checker works correctly with diverse real-world OverpassQL patterns and use cases.
+
 ## Development
 
 Contributions are welcome! Please feel free to submit a Pull Request.
@@ -342,16 +417,22 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
 # Run tests
-python -m pytest tests/
-# or
-overpass-ql-check --test
+python -m pytest tests/ -v
+# or use the test script
+./test.sh
 
 # Run code quality checks (same as CI)
+./quality.sh
+
+# Auto-fix formatting issues
+./quality-fix.sh
+
+# Or run tools individually:
 black --check src/ tests/ examples/
 isort --check-only src/ tests/ examples/
 flake8 src/ tests/ examples/
 
-# Auto-fix formatting issues
+# Auto-fix formatting issues manually
 black src/ tests/ examples/
 isort src/ tests/ examples/
 autopep8 --in-place --aggressive --aggressive src/ tests/ examples/ --recursive
@@ -359,7 +440,13 @@ autopep8 --in-place --aggressive --aggressive src/ tests/ examples/ --recursive
 
 ### Development Tools
 
-This project uses several code quality tools:
+This project uses several code quality tools with convenient scripts:
+
+- **`./quality.sh`**: Runs all quality checks (same as CI pipeline)
+- **`./quality-fix.sh`**: Automatically fixes code formatting issues
+- **`./test.sh`**: Runs the comprehensive test suite
+
+**Individual tools:**
 
 - **black**: Code formatter for consistent Python style
 - **isort**: Import statement organizer and formatter

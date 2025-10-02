@@ -216,6 +216,8 @@ class OverpassQLLexer:
             return "\\"
         elif next_char == quote_char:
             return quote_char
+        elif next_char == "1":  # Handle \1 in make statements
+            return "\\1"
         elif next_char and next_char.startswith("u"):
             # Unicode escape sequence \uXXXX
             return self._handle_unicode_escape()
@@ -287,9 +289,19 @@ class OverpassQLLexer:
         if self.peek() and (self.peek().isalpha() or self.peek() == "_"):
             value += self.advance()
 
-        # Subsequent characters can be letters, digits, or underscores
-        while self.peek() and (self.peek().isalnum() or self.peek() == "_"):
-            value += self.advance()
+        # Subsequent characters can be letters, digits, underscores, or backslashes
+        while self.peek() and (self.peek().isalnum() or self.peek() in "_\\"):
+            char = self.peek()
+            if char == "\\":
+                # Handle backslash followed by digit (like \1)
+                next_char = self.peek(1)
+                if next_char and next_char.isdigit():
+                    value += self.advance()  # Add backslash
+                    value += self.advance()  # Add digit
+                else:
+                    break  # Not a backslash identifier, stop
+            else:
+                value += self.advance()
 
         return value
 
@@ -322,7 +334,7 @@ class OverpassQLLexer:
         return value
 
     def read_template_placeholder(self) -> str:
-        """Read a template placeholder like {{bbox}} or {{variable}}."""
+        """Read a template placeholder like {{bbox}} or {{geocodeArea:"name"}}."""
         value = ""
 
         # Skip first {{
@@ -330,18 +342,42 @@ class OverpassQLLexer:
         self.advance()  # Skip second {
         value += "{{"
 
-        # Read the variable name
-        while self.peek() and self.peek() not in ["}", "\n"]:
+        # Read the content until we find }}
+        in_string = False
+        string_quote = None
+        escape_next = False
+
+        while self.peek():
+            char = self.peek()
+
+            # Handle string literals within template
+            if not escape_next:
+                if char in ['"', "'"]:
+                    if not in_string:
+                        in_string = True
+                        string_quote = char
+                    elif char == string_quote:
+                        in_string = False
+                        string_quote = None
+                elif char == "\\" and in_string:
+                    escape_next = True
+                    value += self.advance()
+                    continue
+                elif char == "}" and not in_string:
+                    # Check for closing }}
+                    if self.peek(1) == "}":
+                        self.advance()  # Skip first }
+                        self.advance()  # Skip second }
+                        value += "}}"
+                        return value
+                elif char == "\n":
+                    self.error("Unterminated template placeholder, expected '}}'")
+            else:
+                escape_next = False
+
             value += self.advance()
 
-        # Check for closing }}
-        if self.peek() == "}" and self.peek(1) == "}":
-            self.advance()  # Skip first }
-            self.advance()  # Skip second }
-            value += "}}"
-        else:
-            self.error("Unterminated template placeholder, expected '}}'")
-
+        self.error("Unterminated template placeholder, expected '}}'")
         return value
 
     def _handle_two_char_operators(
@@ -426,6 +462,69 @@ class OverpassQLLexer:
                     Token(TokenType.LBRACE, "{", start_line, start_column)
                 )
             return True
+        return False
+
+    def _handle_geocode_area(self) -> bool:
+        """Handle geocodeArea: syntax in settings."""
+        if (
+            self.match(TokenType.IDENTIFIER)
+            and self.current_token().value.lower() == "geocodearea"
+        ):
+            geocode_token = self.advance()
+            if self.match(TokenType.COLON):
+                self.advance()  # Skip :
+                if self.match(TokenType.STRING):
+                    area_name = self.advance()
+                    # Create a synthetic token for geocodeArea syntax
+                    geocode_value = f"{{{{geocodeArea:{area_name.value}}}}}"
+                    self.tokens.append(
+                        Token(
+                            TokenType.TEMPLATE_PLACEHOLDER,
+                            geocode_value,
+                            geocode_token.line,
+                            geocode_token.column,
+                        )
+                    )
+                    return True
+        return False
+
+    def _handle_changed_filter(self) -> bool:
+        """Handle changed: filter with date ranges."""
+        if (
+            self.match(TokenType.IDENTIFIER)
+            and self.current_token().value.lower() == "changed"
+        ):
+            self.advance()  # Skip 'changed' token
+            if self.match(TokenType.COLON):
+                self.advance()  # Skip :
+                if self.match(TokenType.STRING):
+                    # Handle date range format: "start,end"
+                    date_token = self.advance()
+                    date_value = date_token.value
+
+                    # Check if it's a date range
+                    if '","' in date_value:
+                        dates = date_value.split('","')
+                        if len(dates) == 2:
+                            # Validate both dates
+                            for date in dates:
+                                if not re.match(
+                                    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date
+                                ):
+                                    self.error(
+                                        f"Invalid date format in changed filter: {date}"
+                                    )
+                            return True
+
+                    # Single date format
+                    elif not re.match(
+                        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_value
+                    ):
+                        self.error(
+                            f"Invalid date format in changed filter: {date_value}"
+                        )
+
+                    return True
         return False
 
     def _handle_basic_tokens(
@@ -794,7 +893,13 @@ class OverpassQLParser:
 
     def _parse_key_value_pattern(self) -> None:
         """Parse key-value pattern like [key=value] or [key~regex]."""
+        key_token = self.current_token()
         self.advance()  # Skip key
+
+        # Special handling for temporal filters like changed:
+        if key_token.value.lower() == "changed" and self.match(TokenType.COLON):
+            self._parse_changed_filter()
+            return
 
         # Check for operator
         if self.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.REGEX_OP):
@@ -806,6 +911,38 @@ class OverpassQLParser:
                 self._validate_and_parse_regex_value(op_token, value_token)
             else:
                 self.error("Expected value after operator in tag filter")
+
+    def _parse_changed_filter(self) -> None:
+        """Parse changed filter with date range like [changed:"start","end"]."""
+        self.advance()  # Skip :
+
+        if not self.match(TokenType.STRING):
+            self.error("Expected date string after 'changed:'")
+            return
+
+        first_date = self.advance()
+
+        # Validate date format
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", first_date.value):
+            self.error(f"Invalid date format in changed filter: {first_date.value}")
+
+        # Check for second date (range)
+        if self.match(TokenType.COMMA):
+            self.advance()  # Skip comma
+
+            if not self.match(TokenType.STRING):
+                self.error("Expected second date string after comma in changed filter")
+                return
+
+            second_date = self.advance()
+
+            # Validate second date format
+            if not re.match(
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
+            ):
+                self.error(
+                    f"Invalid date format in changed filter: {second_date.value}"
+                )
 
     def _parse_dual_regex_pattern(self) -> None:
         """Parse dual regex pattern like [~"key-regex"~"value-regex"]."""
@@ -1426,6 +1563,30 @@ class OverpassQLParser:
 
     def parse_simple_statement(self):
         """Parse simple statements like recursion operators, is_in, etc."""
+        # Handle template placeholders as standalone statements
+        if self.match(TokenType.TEMPLATE_PLACEHOLDER):
+            self.advance()
+
+            # Check if template placeholder is followed by tag filters (like
+            # geocodeArea)
+            while self.match(TokenType.LBRACKET):
+                self.parse_tag_filter()
+
+            # Optional assignment operator
+            if self.match(TokenType.ASSIGN):
+                self.advance()
+                if self.match(TokenType.DOT):
+                    self.advance()
+                    if self.match(TokenType.IDENTIFIER):
+                        self.advance()
+            self.expect(TokenType.SEMICOLON)
+            return True
+
+        # Handle make statements
+        if self.match(TokenType.MAKE):
+            self._parse_make_statement()
+            return True
+
         # Try different statement types
         if self._parse_recursion_statement():
             return True
@@ -1435,6 +1596,90 @@ class OverpassQLParser:
             return True
 
         return False
+
+    def _parse_make_statement(self) -> None:
+        """Parse make statement: make identifier ,key=value,...;"""
+        self.advance()  # Skip 'make'
+
+        # Parse identifier (can contain backslashes like stat_highway_\1)
+        if not self.match(TokenType.IDENTIFIER):
+            self.error("Expected identifier after 'make'")
+            return
+        self.advance()
+
+        # Parse comma-separated key=value pairs
+        while self.match(TokenType.COMMA):
+            self.advance()  # Skip comma
+
+            # Parse key
+            if not self.match(TokenType.IDENTIFIER):
+                self.error("Expected key in make statement")
+                return
+            self.advance()
+
+            # Parse equals
+            if not self.match(TokenType.EQUALS):
+                self.error("Expected '=' in make statement")
+                return
+            self.advance()
+
+            # Parse value expression (can be function calls, etc.)
+            self._parse_make_value_expression()
+
+        self.expect(TokenType.SEMICOLON)
+
+    def _parse_make_value_expression(self) -> None:
+        """Parse value expression in make statement."""
+        # Handle function calls like count(ways), length(sum(length()))
+        if (
+            self.match(TokenType.IDENTIFIER)
+            and self.peek_ahead(1)
+            and self.peek_ahead(1).type == TokenType.LPAREN
+        ):
+            self.advance()  # Function name
+            self.expect(TokenType.LPAREN)
+
+            # Parse function arguments (can be nested)
+            if not self.match(TokenType.RPAREN):
+                self._parse_make_function_args()
+
+            self.expect(TokenType.RPAREN)
+        # Handle simple values
+        elif self.match(TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.STRING):
+            self.advance()
+        else:
+            self.error("Expected value expression in make statement")
+
+    def _parse_make_function_args(self) -> None:
+        """Parse function arguments in make statement."""
+        while True:
+            # Parse argument (can be function call or simple value)
+            if (
+                self.match(TokenType.IDENTIFIER)
+                and self.peek_ahead(1)
+                and self.peek_ahead(1).type == TokenType.LPAREN
+            ):
+                self.advance()  # Function name
+                self.expect(TokenType.LPAREN)
+                if not self.match(TokenType.RPAREN):
+                    self._parse_make_function_args()
+                self.expect(TokenType.RPAREN)
+            elif self.match(TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.STRING):
+                self.advance()
+            else:
+                break
+
+            if self.match(TokenType.COMMA):
+                self.advance()
+            else:
+                break
+
+    def peek_ahead(self, offset: int) -> Optional[Token]:
+        """Peek ahead at token with offset."""
+        pos = self.pos + offset
+        if pos < len(self.tokens):
+            return self.tokens[pos]
+        return None
 
     def parse_statement(self) -> bool:
         """Parse any statement."""
