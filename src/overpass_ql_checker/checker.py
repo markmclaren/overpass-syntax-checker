@@ -103,11 +103,7 @@ class Token:
     column: int
 
     def __str__(self):
-        return f"Token({
-            self.type.value}, '{
-            self.value}', {
-            self.line}:{
-                self.column})"
+        return f"Token({self.type.value}, '{self.value}', {self.line}:{self.column})"
 
 
 class SyntaxError(Exception):
