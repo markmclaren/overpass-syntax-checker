@@ -803,39 +803,48 @@ class OverpassQLParser:
             if i > 0:
                 self.expect(TokenType.COMMA)
 
-            if not self.match(TokenType.NUMBER):
+            if not self.match(TokenType.NUMBER, TokenType.TEMPLATE_PLACEHOLDER):
                 self.error(f"Expected coordinate {i + 1} in bbox")
             else:
                 coord = self.advance()
-                try:
-                    coord_val = float(coord.value)
-                    if i in [0, 2]:  # latitude values
-                        if not -90 <= coord_val <= 90:
-                            self.error(
-                                f"Latitude must be between -90 and 90: " f"{coord_val}"
-                            )
-                    else:  # longitude values
-                        if not -180 <= coord_val <= 180:
-                            self.error(
-                                f"Longitude must be between -180 and 180: "
-                                f"{coord_val}"
-                            )
-                except ValueError:
-                    self.error(f"Invalid coordinate: {coord.value}")
+                # Only validate if it's a number (skip template placeholders)
+                if coord.type == TokenType.NUMBER:
+                    self._validate_bbox_coordinate(coord, i)
+
+    def _validate_bbox_coordinate(self, coord: Token, index: int) -> None:
+        """Validate a single bbox coordinate."""
+        try:
+            coord_val = float(coord.value)
+            if index in [0, 2]:  # latitude values
+                if not -90 <= coord_val <= 90:
+                    self.error(f"Latitude must be between -90 and 90: {coord_val}")
+            else:  # longitude values
+                if not -180 <= coord_val <= 180:
+                    self.error(f"Longitude must be between -180 and 180: {coord_val}")
+        except ValueError:
+            self.error(f"Invalid coordinate: {coord.value}")
 
     def _parse_date_setting(self, setting_token: Token) -> None:
         """Parse date, diff, or adiff settings."""
         self.expect(TokenType.COLON)
 
-        if not self.match(TokenType.STRING):
-            self.error(f"Expected date string after {setting_token.value}:")
+        if not self.match(TokenType.STRING, TokenType.TEMPLATE_PLACEHOLDER):
+            error_msg = (
+                f"Expected date string or template placeholder after "
+                f"{setting_token.value}:"
+            )
+            self.error(error_msg)
         else:
             date_str = self.advance()
-            # Basic ISO 8601 date format validation - also accept template placeholders
-            # Accept both colons and hyphens in time part (common variation)
-            iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
-            if not (re.match(iso_pattern, date_str.value) or "{{" in date_str.value):
-                self.error("Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ")
+            # Only validate if it's a string (skip template placeholders)
+            if date_str.type == TokenType.STRING:
+                # Basic ISO 8601 date format validation
+                # Accept both colons and hyphens in time part (common variation)
+                iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
+                if not (
+                    re.match(iso_pattern, date_str.value) or "{{" in date_str.value
+                ):
+                    self.error("Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ")
 
     def _parse_unknown_setting(self, setting_token: Token) -> None:
         """Parse unknown settings with warning."""
@@ -874,21 +883,56 @@ class OverpassQLParser:
         self.advance()  # Skip (
 
         # Parse CSV parameters - field lists, options, separators, etc.
-        paren_depth = 1
-        while paren_depth > 0 and not self.match(TokenType.EOF):
-            token = self.current_token()
-            if token.type == TokenType.LPAREN:
-                paren_depth += 1
-            elif token.type == TokenType.RPAREN:
-                paren_depth -= 1
+        # CSV format can be: csv(field1,field2,...; options; separator)
+        self._parse_csv_field_list()
 
-            if paren_depth > 0:  # Don't advance past the final closing paren
-                self.advance()
+        # Handle optional sections separated by semicolons
+        while self.match(TokenType.SEMICOLON):
+            self.advance()  # Skip ;
+            # Parse options or separators
+            while not self.match(TokenType.SEMICOLON, TokenType.RPAREN, TokenType.EOF):
+                if self.match(TokenType.STRING, TokenType.IDENTIFIER, TokenType.NUMBER):
+                    self.advance()
+                else:
+                    break
 
         if self.match(TokenType.RPAREN):
             self.advance()  # Skip final )
         else:
             self.error("Expected ')' after CSV parameters")
+
+    def _parse_csv_field_list(self) -> None:
+        """Parse CSV field list (first part of CSV parameters)."""
+        # Handle first field
+        if self.match(TokenType.STRING, TokenType.IDENTIFIER, TokenType.COLON):
+            self._parse_csv_field()
+
+        # Handle additional fields separated by commas
+        while self.match(TokenType.COMMA):
+            self.advance()  # Skip comma
+            if not self.match(
+                TokenType.SEMICOLON, TokenType.RPAREN
+            ):  # Not end of field list
+                self._parse_csv_field()
+
+    def _parse_csv_field(self) -> None:
+        """Parse a single CSV field specification."""
+        # Handle special field types like ::id, ::type, etc.
+        if self.match(TokenType.COLON):
+            self.advance()  # Skip first :
+            if self.match(TokenType.COLON):
+                self.advance()  # Skip second :
+            # Parse field name after ::
+            if self.match(TokenType.IDENTIFIER):
+                self.advance()
+        # Handle quoted field names or regular identifiers
+        elif self.match(TokenType.STRING, TokenType.IDENTIFIER):
+            self.advance()
+        else:
+            # Allow any tokens in CSV field specifications for now
+            # since CSV field syntax can be complex
+            if not self.match(TokenType.COMMA, TokenType.SEMICOLON, TokenType.RPAREN):
+                self.advance()
 
     def parse_settings(self) -> bool:
         """Parse settings statement."""
@@ -1373,16 +1417,18 @@ class OverpassQLParser:
 
     def _parse_user_list_filter(self) -> None:
         """Parse user list filter."""
-        if not self.match(TokenType.STRING):
-            self.error("Expected username string after 'user:'")
+        if not self.match(TokenType.STRING, TokenType.TEMPLATE_PLACEHOLDER):
+            self.error("Expected username string or template placeholder after 'user:'")
         else:
             self.advance()  # First username
 
             # Parse additional usernames
             while self.match(TokenType.COMMA):
                 self.advance()
-                if not self.match(TokenType.STRING):
-                    self.error("Expected username string in user list")
+                if not self.match(TokenType.STRING, TokenType.TEMPLATE_PLACEHOLDER):
+                    self.error(
+                        "Expected username string or template placeholder in user list"
+                    )
                 else:
                     self.advance()
 
@@ -1900,7 +1946,7 @@ class OverpassQLParser:
                 self.expect(TokenType.RPAREN)
 
     def _parse_for_evaluator(self) -> None:
-        """Parse FOR loop evaluator like t["key"] or user()."""
+        """Parse FOR loop evaluator like t["key"], user(), keys(), etc."""
         # Handle user() pattern
         if (
             self.match(TokenType.IDENTIFIER)
@@ -1908,32 +1954,57 @@ class OverpassQLParser:
             and self.peek_token()
             and self.peek_token().type == TokenType.LPAREN
         ):
-
             self.advance()  # Skip 'user'
             self.advance()  # Skip '('
             self.expect(TokenType.RPAREN)
             return
 
-        # Handle t["key"] pattern
-        if not self.match(TokenType.IDENTIFIER):
-            self.error("Expected evaluator identifier in for loop")
+        # Handle keys() pattern
+        if (
+            self.match(TokenType.IDENTIFIER)
+            and self.current_token().value.lower() == "keys"
+            and self.peek_token()
+            and self.peek_token().type == TokenType.LPAREN
+        ):
+            self.advance()  # Skip 'keys'
+            self.advance()  # Skip '('
+            self.expect(TokenType.RPAREN)
             return
-        self.advance()
 
-        # Parse tag filter part like ["key"]
-        if self.match(TokenType.LBRACKET):
+        # Handle t["key"] pattern and other complex expressions
+        if self.match(TokenType.IDENTIFIER):
             self.advance()
-            if self.match(TokenType.STRING, TokenType.IDENTIFIER):
+
+            # Parse tag filter part like ["key"] or function calls
+            if self.match(TokenType.LBRACKET):
                 self.advance()
-            else:
-                self.error("Expected key name in for evaluator")
-            self.expect(TokenType.RBRACKET)
+                if self.match(TokenType.STRING, TokenType.IDENTIFIER):
+                    self.advance()
+                else:
+                    self.error("Expected key name in for evaluator")
+                self.expect(TokenType.RBRACKET)
+            elif self.match(TokenType.LPAREN):
+                # Handle function calls in for evaluator
+                self.advance()  # Skip (
+                # Parse function arguments
+                while not self.match(TokenType.RPAREN, TokenType.EOF):
+                    if self.match(
+                        TokenType.STRING, TokenType.IDENTIFIER, TokenType.NUMBER
+                    ):
+                        self.advance()
+                    elif self.match(TokenType.COMMA):
+                        self.advance()
+                    else:
+                        break
+                self.expect(TokenType.RPAREN)
         else:
-            self.error("Expected tag filter in for evaluator")
+            self.error("Expected evaluator identifier in for loop")
 
     def _parse_block_body(self) -> bool:
         """Parse block body and return whether braces were used."""
         has_braces = False
+
+        # Handle both braces { } and parentheses ( ) for block bodies
         if self.match(TokenType.LBRACE):
             has_braces = True
             self.advance()
@@ -1943,6 +2014,15 @@ class OverpassQLParser:
                     break
 
             self.expect(TokenType.RBRACE)
+        elif self.match(TokenType.LPAREN):
+            has_braces = True  # Treat parentheses like braces for semicolon handling
+            self.advance()
+
+            while not self.match(TokenType.RPAREN, TokenType.EOF):
+                if not self.parse_statement():
+                    break
+
+            self.expect(TokenType.RPAREN)
         return has_braces
 
     def _parse_else_clause(self) -> bool:
@@ -1986,8 +2066,13 @@ class OverpassQLParser:
         if block_type.type == TokenType.IF:
             has_braces = self._parse_else_clause() or has_braces
 
-        # Only expect semicolon if we didn't use braces
-        if not has_braces:
+        # Semicolon handling: optional for braced statements, required for non-braced
+        if has_braces:
+            # For braced statements, semicolon is completely optional
+            if self.match(TokenType.SEMICOLON):
+                self.advance()
+        else:
+            # For non-braced statements, semicolon is required
             self.expect(TokenType.SEMICOLON)
 
         return True
@@ -2263,7 +2348,36 @@ class OverpassQLParser:
 
     def _parse_make_value_expression(self) -> None:
         """Parse value expression in make statement."""
+        self._parse_make_ternary_expression()
+
+    def _parse_make_ternary_expression(self) -> None:
+        """Parse ternary expressions (condition ? true_value : false_value)."""
+        self._parse_make_comparison_expression()
+
+        # Handle ternary operator
+        if self.match(TokenType.QUESTION):
+            self.advance()  # Skip ?
+            self._parse_make_comparison_expression()  # true value
+            if self.match(TokenType.COLON):
+                self.advance()  # Skip :
+                self._parse_make_comparison_expression()  # false value
+            else:
+                self.error("Expected ':' in ternary expression")
+
+    def _parse_make_comparison_expression(self) -> None:
+        """Parse comparison expressions (==, !=, <, >, <=, >=)."""
         self._parse_make_additive_expression()
+
+        while self.match(
+            TokenType.EQUAL_EQUAL,
+            TokenType.NOT_EQUALS,
+            TokenType.LESS_THAN,
+            TokenType.GREATER_THAN,
+            TokenType.LESS_EQUAL,
+            TokenType.GREATER_EQUAL,
+        ):
+            self.advance()  # Skip operator
+            self._parse_make_additive_expression()
 
     def _parse_make_additive_expression(self) -> None:
         """Parse additive expressions (+ and -)."""
@@ -2377,10 +2491,20 @@ class OverpassQLParser:
 
     def _parse_convert_single_assignment(self) -> None:
         """Parse a single assignment in a convert statement."""
-        # Handle ::id syntax
+        # Handle ::id syntax or ::=id() syntax
         if self.match(TokenType.COLON):
             self.advance()  # Skip first :
-            self.expect(TokenType.COLON)  # Skip second :
+            if self.match(TokenType.COLON):
+                self.advance()  # Skip second :
+                # Handle ::= syntax (double colon equals)
+                if self.match(TokenType.EQUALS):
+                    self.advance()  # Skip =
+                    # Parse value expression after ::=
+                    self._parse_convert_assignment_value()
+                    return
+            else:
+                # Single colon, rewind
+                self.pos -= 1
 
         # Parse the identifier
         if not self.match(TokenType.IDENTIFIER):
@@ -2399,36 +2523,8 @@ class OverpassQLParser:
 
     def _parse_convert_assignment_value(self) -> None:
         """Parse the value part of a convert assignment."""
-        # Handle function calls like id(), type()
-        if (
-            self.match(TokenType.IDENTIFIER)
-            and self.peek_ahead(1)
-            and self.peek_ahead(1).type == TokenType.LPAREN
-        ):
-            self.advance()  # Function name
-            self.expect(TokenType.LPAREN)
-
-            # Parse function arguments (can be nested)
-            if not self.match(TokenType.RPAREN):
-                self._parse_make_function_args()  # Reuse from make statement
-
-            self.expect(TokenType.RPAREN)
-        # Handle tag access like t["key"]
-        elif self.match(TokenType.IDENTIFIER):
-            self.advance()
-            # Handle tag access like t["key"]
-            if self.match(TokenType.LBRACKET):
-                self.advance()  # Skip [
-                if self.match(TokenType.STRING):
-                    self.advance()  # Skip string key
-                else:
-                    self.error("Expected string key in tag access")
-                self.expect(TokenType.RBRACKET)
-        # Handle simple values
-        elif self.match(TokenType.NUMBER, TokenType.STRING):
-            self.advance()
-        else:
-            self.error("Expected value expression in convert assignment")
+        # Reuse the sophisticated expression parsing from make statements
+        self._parse_make_value_expression()
 
     def _parse_parentheses_content(self) -> None:
         """Parse content inside parentheses, handling nested parentheses."""
