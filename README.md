@@ -1,7 +1,18 @@
 # Overpass QL Syntax Checker
 
+> **🚧 Work in Progress**
+>
+> This project is currently under active development. While the core functionality is working, we're still:
+>
+> - Adding more comprehensive tests
+> - Fixing edge cases in syntax validation
+> - Preparing for PyPI publication
+>
+> Feel free to test it out, but expect some changes before the stable release!
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Support](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+![Status](https://img.shields.io/badge/status-work--in--progress-orange.svg)
 
 A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL), used to query OpenStreetMap data through the Overpass API.
 
