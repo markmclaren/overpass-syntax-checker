@@ -1263,7 +1263,7 @@ class OverpassQLParser:
 
         first_date = self.advance()
         # Validate date format
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", first_date.value):
+        if not self._is_valid_date_or_template(first_date.value):
             self.error(f"Invalid date format in changed filter: {first_date.value}")
 
         # Check for second date (range)
@@ -1276,9 +1276,7 @@ class OverpassQLParser:
 
             second_date = self.advance()
             # Validate second date format
-            if not re.match(
-                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
-            ):
+            if not self._is_valid_date_or_template(second_date.value):
                 self.error(
                     f"Invalid date format in changed filter: {second_date.value}"
                 )
@@ -1313,6 +1311,14 @@ class OverpassQLParser:
         # Handle special case for changed filter with date range
         elif filter_name.lower() == "changed" and self.match(TokenType.COLON):
             self._parse_changed_filter_spatial()
+        # Handle special case for id filter with comma-separated list
+        elif filter_name.lower() == "id" and self.match(TokenType.COLON):
+            self.advance()  # Skip ':'
+            self._parse_id_list_filter()
+        # Handle special case for user filter with comma-separated list
+        elif filter_name.lower() == "user" and self.match(TokenType.COLON):
+            self.advance()  # Skip ':'
+            self._parse_user_list_filter()
         # Handle other filters with parameters
         elif self.match(TokenType.COLON):
             self.advance()
@@ -1365,6 +1371,33 @@ class OverpassQLParser:
                 else:
                     self.advance()
 
+    def _parse_user_list_filter(self) -> None:
+        """Parse user list filter."""
+        if not self.match(TokenType.STRING):
+            self.error("Expected username string after 'user:'")
+        else:
+            self.advance()  # First username
+
+            # Parse additional usernames
+            while self.match(TokenType.COMMA):
+                self.advance()
+                if not self.match(TokenType.STRING):
+                    self.error("Expected username string in user list")
+                else:
+                    self.advance()
+
+    def _is_valid_date_or_template(self, date_value: str) -> bool:
+        """Check if a string is a valid date format or template placeholder."""
+        # Check for ISO date format
+        if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_value):
+            return True
+
+        # Check for template placeholders like {{date:X days}} or {{date:X day}}
+        if re.match(r"^\{\{date:\d+\s+(day|days)\}\}$", date_value):
+            return True
+
+        return False
+
     def _parse_identifier_filters(self) -> None:
         """Parse filters that start with identifiers."""
         filter_name = self.advance()
@@ -1382,9 +1415,7 @@ class OverpassQLParser:
 
                 first_date = self.advance()
                 # Validate date format
-                if not re.match(
-                    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", first_date.value
-                ):
+                if not self._is_valid_date_or_template(first_date.value):
                     self.error(
                         f"Invalid date format in changed filter: {first_date.value}"
                     )
@@ -1401,9 +1432,7 @@ class OverpassQLParser:
 
                     second_date = self.advance()
                     # Validate second date format
-                    if not re.match(
-                        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
-                    ):
+                    if not self._is_valid_date_or_template(second_date.value):
                         self.error(
                             "Invalid date format in changed filter: "
                             + second_date.value
@@ -2058,6 +2087,8 @@ class OverpassQLParser:
                 self._parse_set_reference_recursion_operation()
             elif self.match(TokenType.MAP_TO_AREA):
                 self._parse_set_reference_map_to_area_operation()
+            elif self.match(TokenType.IS_IN):
+                self._parse_set_reference_is_in_operation()
 
             self._expect_optional_semicolon()
             return True
@@ -2084,6 +2115,27 @@ class OverpassQLParser:
                 self.advance()
                 if not self._parse_set_name():
                     self.error("Expected set name after '->'")
+
+    def _parse_set_reference_is_in_operation(self) -> None:
+        """Parse is_in operation after set reference."""
+        self.advance()  # Skip is_in
+        # Handle optional assignment to set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if not self._parse_set_name():
+                    self.error("Expected set name after '->'")
+        # Handle optional coordinates (for is_in with coordinates)
+        elif self.match(TokenType.LPAREN):
+            self._parse_is_in_coordinates()
+            # Handle optional assignment after coordinates
+            if self.match(TokenType.ASSIGN):
+                self.advance()
+                if self.match(TokenType.DOT):
+                    self.advance()
+                    if not self._parse_set_name():
+                        self.error("Expected set name after '->'")
 
     def parse_simple_statement(self):
         """Parse simple statements like recursion operators, is_in, etc."""
@@ -2248,8 +2300,16 @@ class OverpassQLParser:
         # Handle complex expressions like _.val
         elif self.match(TokenType.IDENTIFIER):
             self.advance()
+            # Handle tag access like t["key"]
+            if self.match(TokenType.LBRACKET):
+                self.advance()  # Skip [
+                if self.match(TokenType.STRING):
+                    self.advance()  # Skip string key
+                else:
+                    self.error("Expected string key in tag access")
+                self.expect(TokenType.RBRACKET)
             # Handle dotted access like _.val
-            if self.match(TokenType.DOT):
+            elif self.match(TokenType.DOT):
                 self.advance()
                 if self.match(TokenType.IDENTIFIER):
                     self.advance()
@@ -2303,25 +2363,72 @@ class OverpassQLParser:
 
     def _parse_convert_assignments(self) -> None:
         """Parse assignment patterns in convert statements."""
-        while self.match(TokenType.IDENTIFIER):
-            self.advance()  # Skip identifier
+        # Handle first assignment (may not have comma before it)
+        if self.match(TokenType.IDENTIFIER) or self.match(TokenType.COLON):
+            self._parse_convert_single_assignment()
 
-            if self.match(TokenType.ASSIGN):
-                self.advance()  # Skip =
-                self._parse_convert_assignment_value()
+        # Handle additional assignments separated by commas
+        while self.match(TokenType.COMMA):
+            self.advance()  # Skip comma
+            if self.match(TokenType.IDENTIFIER) or self.match(TokenType.COLON):
+                self._parse_convert_single_assignment()
+            else:
+                break
 
-            # Skip comma if present
-            if self.match(TokenType.COMMA):
-                self.advance()
+    def _parse_convert_single_assignment(self) -> None:
+        """Parse a single assignment in a convert statement."""
+        # Handle ::id syntax
+        if self.match(TokenType.COLON):
+            self.advance()  # Skip first :
+            self.expect(TokenType.COLON)  # Skip second :
+
+        # Parse the identifier
+        if not self.match(TokenType.IDENTIFIER):
+            self.error("Expected identifier in convert assignment")
+            return
+        self.advance()  # Skip identifier
+
+        # Expect equals sign
+        if not self.match(TokenType.EQUALS):
+            self.error("Expected '=' in convert assignment")
+            return
+        self.advance()  # Skip =
+
+        # Parse the value expression (can be function calls, etc.)
+        self._parse_convert_assignment_value()
 
     def _parse_convert_assignment_value(self) -> None:
         """Parse the value part of a convert assignment."""
-        if self.match(TokenType.IDENTIFIER):
-            self.advance()  # Skip function name
-            if self.match(TokenType.LPAREN):
-                self._parse_parentheses_content()
-        elif self.match(TokenType.STRING, TokenType.NUMBER):
+        # Handle function calls like id(), type()
+        if (
+            self.match(TokenType.IDENTIFIER)
+            and self.peek_ahead(1)
+            and self.peek_ahead(1).type == TokenType.LPAREN
+        ):
+            self.advance()  # Function name
+            self.expect(TokenType.LPAREN)
+
+            # Parse function arguments (can be nested)
+            if not self.match(TokenType.RPAREN):
+                self._parse_make_function_args()  # Reuse from make statement
+
+            self.expect(TokenType.RPAREN)
+        # Handle tag access like t["key"]
+        elif self.match(TokenType.IDENTIFIER):
             self.advance()
+            # Handle tag access like t["key"]
+            if self.match(TokenType.LBRACKET):
+                self.advance()  # Skip [
+                if self.match(TokenType.STRING):
+                    self.advance()  # Skip string key
+                else:
+                    self.error("Expected string key in tag access")
+                self.expect(TokenType.RBRACKET)
+        # Handle simple values
+        elif self.match(TokenType.NUMBER, TokenType.STRING):
+            self.advance()
+        else:
+            self.error("Expected value expression in convert assignment")
 
     def _parse_parentheses_content(self) -> None:
         """Parse content inside parentheses, handling nested parentheses."""
@@ -2343,10 +2450,10 @@ class OverpassQLParser:
             self.advance()
             if self.match(TokenType.DOT):
                 self.advance()
-                if self.match(TokenType.IDENTIFIER):
-                    self.advance()
-                else:
+                if not self._parse_set_name():
                     self.error("Expected set name after '->'")
+            else:
+                self.error("Expected '.' after '->' in map_to_area statement")
 
         self.expect(TokenType.SEMICOLON)
 
