@@ -10,7 +10,6 @@ used to query OpenStreetMap data through the Overpass API.
 
 __version__ = "1.0.0"
 __author__ = "Mark McLaren"
-__email__ = "mark@example.com"  # Replace with your actual email
 __license__ = "MIT"
 
 from .checker import OverpassQLSyntaxChecker

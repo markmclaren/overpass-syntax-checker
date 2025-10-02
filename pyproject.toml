@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "overpass-ql-checker"
 version = "1.0.0"
 authors = [
-    {name = "Mark McLaren", email = "mark@example.com"},  # Replace with your actual email
+    {name = "Mark McLaren"},
 ]
 description = "A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL)"
 readme = "README.md"
