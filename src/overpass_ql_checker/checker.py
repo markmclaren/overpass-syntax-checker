@@ -317,16 +317,16 @@ class OverpassQLLexer:
     def read_template_placeholder(self) -> str:
         """Read a template placeholder like {{bbox}} or {{variable}}."""
         value = ""
-        
+
         # Skip first {{
         self.advance()  # Skip first {
         self.advance()  # Skip second {
         value += "{{"
-        
+
         # Read the variable name
-        while self.peek() and self.peek() not in ['}', '\n']:
+        while self.peek() and self.peek() not in ["}", "\n"]:
             value += self.advance()
-        
+
         # Check for closing }}
         if self.peek() == "}" and self.peek(1) == "}":
             self.advance()  # Skip first }
@@ -334,7 +334,7 @@ class OverpassQLLexer:
             value += "}}"
         else:
             self.error("Unterminated template placeholder, expected '}}'")
-        
+
         return value
 
     def tokenize(self) -> List[Token]:
@@ -474,7 +474,12 @@ class OverpassQLLexer:
                 if self.peek(1) == "{":
                     template_value = self.read_template_placeholder()
                     self.tokens.append(
-                        Token(TokenType.TEMPLATE_PLACEHOLDER, template_value, start_line, start_column)
+                        Token(
+                            TokenType.TEMPLATE_PLACEHOLDER,
+                            template_value,
+                            start_line,
+                            start_column,
+                        )
                     )
                 else:
                     self.advance()
@@ -572,8 +577,8 @@ class OverpassQLParser:
         """Add an error message."""
         if token:
             error_msg = f"Syntax Error at line {
-                    token.line}, column {
-                    token.column}: {message}"
+                token.line}, column {
+                token.column}: {message}"
         else:
             current = self.current_token()
             error_msg = f"Syntax Error at line {
@@ -585,13 +590,13 @@ class OverpassQLParser:
         """Add a warning message."""
         if token:
             warning_msg = f"Warning at line {
-                    token.line}, column {
-                    token.column}: {message}"
+                token.line}, column {
+                token.column}: {message}"
         else:
             current = self.current_token()
             warning_msg = f"Warning at line {
-                    current.line}, column {
-                    current.column}: {message}"
+                current.line}, column {
+                current.column}: {message}"
         self.warnings.append(warning_msg)
 
     def current_token(self) -> Token:
@@ -746,28 +751,26 @@ class OverpassQLParser:
                 if self.match(TokenType.IDENTIFIER):
                     format_token = self.advance()
                     format_name = format_token.value.lower()
-                    
+
                     if format_name not in self.OUTPUT_FORMATS:
-                        self.error(
-                            f"Invalid output format: {format_token.value}"
-                        )
-                    
+                        self.error(f"Invalid output format: {format_token.value}")
+
                     # Handle CSV with parameters: csv(fields; options; separator)
                     if format_name == "csv" and self.match(TokenType.LPAREN):
                         self.advance()  # Skip (
-                        
+
                         # Parse CSV parameters - this is simplified parsing
                         # In real Overpass QL, this has complex field specifications
                         while not self.match(TokenType.RPAREN, TokenType.EOF):
                             # Skip any tokens until we find the closing paren
                             # This handles field lists, options, separators, etc.
                             self.advance()
-                        
+
                         if self.match(TokenType.RPAREN):
                             self.advance()  # Skip )
                         else:
                             self.error("Expected ')' after CSV parameters")
-                            
+
                 elif self.match(TokenType.STRING):
                     # Could be csv with parameters
                     self.advance()
@@ -964,9 +967,20 @@ class OverpassQLParser:
 
                 # Define valid spatial filter identifiers
                 valid_spatial_filters = {
-                    "w", "r", "bn", "bw", "br",  # member filters
-                    "bbox", "id", "newer", "user", "uid", "changed",  # other valid filters
-                    "nds", "ndr", "pivot"  # relation member filters
+                    "w",
+                    "r",
+                    "bn",
+                    "bw",
+                    "br",  # member filters
+                    "bbox",
+                    "id",
+                    "newer",
+                    "user",
+                    "uid",
+                    "changed",  # other valid filters
+                    "nds",
+                    "ndr",
+                    "pivot",  # relation member filters
                 }
 
                 if filter_name not in valid_spatial_filters:

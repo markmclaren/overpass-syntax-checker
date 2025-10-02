@@ -52,9 +52,12 @@ class TestOverpassQLSyntaxChecker:
         query = "[invalid:setting];"
         result = self.checker.check_syntax(query)
         assert result["valid"], f"Query with unknown setting should be valid: {query}"
-        assert len(result["warnings"]) > 0, f"Warnings expected for unknown setting: {query}"
-        assert any("Unknown setting" in warning for warning in result["warnings"]), \
-            f"Expected 'Unknown setting' warning: {result['warnings']}"
+        assert (
+            len(result["warnings"]) > 0
+        ), f"Warnings expected for unknown setting: {query}"
+        assert any(
+            "Unknown setting" in warning for warning in result["warnings"]
+        ), f"Expected 'Unknown setting' warning: {result['warnings']}"
 
     def test_complex_valid_queries(self):
         """Test complex valid queries."""
