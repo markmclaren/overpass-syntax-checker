@@ -1311,7 +1311,10 @@ class OverpassQLParser:
             self.expect(TokenType.RPAREN)
             return
 
-        if self.match(TokenType.IDENTIFIER, TokenType.AREA):
+        # Handle if-expressions like (if:count_by_role("outer")==1)
+        if self.match(TokenType.IF):
+            self._parse_if_expression()
+        elif self.match(TokenType.IDENTIFIER, TokenType.AREA):
             self._parse_identifier_spatial_filter()
         # Could also be bbox coordinates or ID list
         elif self.match(TokenType.NUMBER):
@@ -1336,19 +1339,52 @@ class OverpassQLParser:
     def _parse_dotted_spatial_filter(self, filter_name: str):
         """Parse dotted spatial filters like around.setname:distance."""
         self.advance()  # Skip .
-        if not self.match(TokenType.IDENTIFIER):
+        if not self._parse_set_name():
             self.error(f"Expected set name after '{filter_name}.'")
         else:
-            set_name = self.advance()
+            # _parse_set_name() already advanced the token
             # Now handle the specific filter type with set reference
             if filter_name == "around":
-                self._parse_around_set_filter(set_name)
+                # For around.setname, we need to parse :distance
+                self._parse_around_set_filter(
+                    None
+                )  # Pass None since we don't need the token
             elif filter_name == "pivot":
                 # pivot.setname doesn't need additional parsing
                 pass
             else:
                 # Other filters with set references
                 pass
+
+    def _parse_if_expression(self):
+        """Parse if-expression like if:count_by_role("outer")==1."""
+        self.advance()  # Skip 'if'
+
+        # Expect colon after 'if'
+        if not self.match(TokenType.COLON):
+            self.error("Expected ':' after 'if'")
+            return
+        self.advance()  # Skip ':'
+
+        # Parse the expression until we reach the closing parenthesis
+        # For now, we'll parse it as a general expression and just skip tokens
+        # A full implementation would need a proper expression parser
+        paren_depth = 0
+        while self.pos < len(self.tokens):
+            current = self.current_token()
+
+            if current.type == TokenType.LPAREN:
+                paren_depth += 1
+                self.advance()
+            elif current.type == TokenType.RPAREN:
+                if paren_depth == 0:
+                    # This is the closing paren of the if-expression
+                    break
+                paren_depth -= 1
+                self.advance()
+            else:
+                # Skip all other tokens in the expression
+                self.advance()
 
     def _parse_simple_spatial_filter(self, filter_name: str):
         """Parse simple spatial filters without dots."""
@@ -1390,13 +1426,9 @@ class OverpassQLParser:
                 self.error("Expected '.' after '->' in assignment")
             else:
                 self.advance()
-                if not self.match(TokenType.IDENTIFIER):
+                if not self._parse_set_name():
                     self.error("Expected set name after '.'")
-                else:
-                    set_name = self.advance()
-                    # Validate set name
-                    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", set_name.value):
-                        self.error(f"Invalid set name: {set_name.value}")
+                # No need to validate set name here, _parse_set_name handles it
 
         self.expect(TokenType.SEMICOLON)
         return True
@@ -1513,10 +1545,8 @@ class OverpassQLParser:
                 self.error("Expected '.' after '->' in union assignment")
             else:
                 self.advance()
-                if not self.match(TokenType.IDENTIFIER):
+                if not self._parse_set_name():
                     self.error("Expected set name after '.'")
-                else:
-                    self.advance()
 
         self.expect(TokenType.SEMICOLON)
         return True
