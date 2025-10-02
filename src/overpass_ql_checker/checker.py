@@ -203,6 +203,36 @@ class OverpassQLLexer:
         while self.peek() and self.peek() in " \t\r":
             self.advance()
 
+    def _handle_escape_sequence(self, quote_char: str) -> str:
+        """Handle escape sequences in string literals."""
+        next_char = self.advance()
+        if next_char == "n":
+            return "\n"
+        elif next_char == "t":
+            return "\t"
+        elif next_char == "r":
+            return "\r"
+        elif next_char == "\\":
+            return "\\"
+        elif next_char == quote_char:
+            return quote_char
+        elif next_char and next_char.startswith("u"):
+            # Unicode escape sequence \uXXXX
+            return self._handle_unicode_escape()
+        else:
+            return next_char
+
+    def _handle_unicode_escape(self) -> str:
+        """Handle unicode escape sequence \\uXXXX."""
+        unicode_digits = ""
+        for _ in range(4):
+            digit = self.advance()
+            if digit and digit in "0123456789abcdefABCDEF":
+                unicode_digits += digit
+            else:
+                self.error("Invalid unicode escape sequence")
+        return chr(int(unicode_digits, 16))
+
     def read_string(self, quote_char: str) -> str:
         """Read a string literal."""
         value = ""
@@ -211,30 +241,7 @@ class OverpassQLLexer:
         while self.peek() and self.peek() != quote_char:
             char = self.advance()
             if char == "\\":
-                # Handle escape sequences
-                next_char = self.advance()
-                if next_char == "n":
-                    value += "\n"
-                elif next_char == "t":
-                    value += "\t"
-                elif next_char == "r":
-                    value += "\r"
-                elif next_char == "\\":
-                    value += "\\"
-                elif next_char == quote_char:
-                    value += quote_char
-                elif next_char and next_char.startswith("u"):
-                    # Unicode escape sequence \uXXXX
-                    unicode_digits = ""
-                    for _ in range(4):
-                        digit = self.advance()
-                        if digit and digit in "0123456789abcdefABCDEF":
-                            unicode_digits += digit
-                        else:
-                            self.error("Invalid unicode escape sequence")
-                    value += chr(int(unicode_digits, 16))
-                else:
-                    value += next_char
+                value += self._handle_escape_sequence(quote_char)
             else:
                 value += char
 
@@ -337,6 +344,151 @@ class OverpassQLLexer:
 
         return value
 
+    def _handle_two_char_operators(self, char: str, start_line: int,
+                                   start_column: int) -> bool:
+        """Handle two-character operators. Returns True if handled, False otherwise."""
+        if char == "-" and self.peek(1) == ">":
+            self.advance()
+            self.advance()
+            self.tokens.append(
+                Token(TokenType.ASSIGN, "->", start_line, start_column)
+            )
+            return True
+        elif char == "<" and self.peek(1) == "<":
+            self.advance()
+            self.advance()
+            self.tokens.append(
+                Token(TokenType.RECURSE_UP_REL, "<<", start_line, start_column)
+            )
+            return True
+        elif char == ">" and self.peek(1) == ">":
+            self.advance()
+            self.advance()
+            self.tokens.append(
+                Token(TokenType.RECURSE_DOWN_REL, ">>", start_line, start_column)
+            )
+            return True
+        elif char == "!" and self.peek(1) == "=":
+            self.advance()
+            self.advance()
+            self.tokens.append(
+                Token(TokenType.NOT_EQUALS, "!=", start_line, start_column)
+            )
+            return True
+        return False
+
+    def _handle_single_char_tokens(self, char: str, start_line: int,
+                                   start_column: int) -> bool:
+        """Handle single-character tokens. Returns True if handled, False otherwise."""
+        token_map = {
+            ";": TokenType.SEMICOLON,
+            ",": TokenType.COMMA,
+            ".": TokenType.DOT,
+            ":": TokenType.COLON,
+            "(": TokenType.LPAREN,
+            ")": TokenType.RPAREN,
+            "[": TokenType.LBRACKET,
+            "]": TokenType.RBRACKET,
+            "}": TokenType.RBRACE,
+            "<": TokenType.RECURSE_UP,
+            ">": TokenType.RECURSE_DOWN,
+            "-": TokenType.UNION_MINUS,
+            "~": TokenType.REGEX_OP,
+            "!": TokenType.NOT_OP,
+            "=": TokenType.EQUALS,
+        }
+
+        if char in token_map:
+            self.advance()
+            self.tokens.append(
+                Token(token_map[char], char, start_line, start_column)
+            )
+            return True
+        return False
+
+    def _handle_brace_tokens(self, char: str, start_line: int,
+                             start_column: int) -> bool:
+        """Handle brace tokens including template placeholders."""
+        if char == "{":
+            # Check for template placeholder {{variable}}
+            if self.peek(1) == "{":
+                template_value = self.read_template_placeholder()
+                self.tokens.append(
+                    Token(
+                        TokenType.TEMPLATE_PLACEHOLDER,
+                        template_value,
+                        start_line,
+                        start_column,
+                    )
+                )
+            else:
+                self.advance()
+                self.tokens.append(
+                    Token(TokenType.LBRACE, "{", start_line, start_column)
+                )
+            return True
+        return False
+
+    def _handle_basic_tokens(self, char: str, start_line: int,
+                             start_column: int) -> bool:
+        """Handle basic character types. Returns True if handled."""
+        # Skip whitespace
+        if char in " \t\r":
+            self.skip_whitespace()
+            return True
+
+        # Newlines
+        elif char == "\n":
+            self.advance()
+            self.tokens.append(
+                Token(TokenType.NEWLINE, "\\n", start_line, start_column)
+            )
+            return True
+
+        # Comments
+        elif char == "/" and self.peek(1) in ["/", "*"]:
+            comment_text = self.read_comment()
+            self.tokens.append(
+                Token(TokenType.COMMENT, comment_text, start_line, start_column)
+            )
+            return True
+
+        # String literals
+        elif char in ['"', "'"]:
+            string_value = self.read_string(char)
+            self.tokens.append(
+                Token(TokenType.STRING, string_value, start_line, start_column)
+            )
+            return True
+
+        return False
+
+    def _handle_numbers_and_identifiers(self, char: str, start_line: int,
+                                        start_column: int) -> bool:
+        """Handle numbers and identifiers. Returns True if handled."""
+        # Numbers
+        if char.isdigit() or (
+            char == "-" and self.peek(1) and self.peek(1).isdigit()
+        ):
+            number_value = self.read_number()
+            self.tokens.append(
+                Token(TokenType.NUMBER, number_value, start_line, start_column)
+            )
+            return True
+
+        # Identifiers and keywords
+        elif char.isalpha() or char == "_":
+            identifier = self.read_identifier()
+            token_type = self.KEYWORDS.get(
+                identifier.lower(), TokenType.IDENTIFIER
+            )
+            self.tokens.append(
+                Token(token_type, identifier, start_line, start_column)
+            )
+            return True
+
+        return False
+
     def tokenize(self) -> List[Token]:
         """Tokenize the input text."""
         self.tokens = []
@@ -350,184 +502,25 @@ class OverpassQLLexer:
             if not char:
                 break
 
-            # Skip whitespace
-            if char in " \t\r":
-                self.skip_whitespace()
+            # Handle basic token types
+            if self._handle_basic_tokens(char, start_line, start_column):
                 continue
 
-            # Newlines
-            elif char == "\n":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.NEWLINE, "\\n", start_line, start_column)
-                )
-
-            # Comments
-            elif char == "/" and self.peek(1) in ["/", "*"]:
-                comment_text = self.read_comment()
-                self.tokens.append(
-                    Token(TokenType.COMMENT, comment_text, start_line, start_column)
-                )
-
-            # String literals
-            elif char in ['"', "'"]:
-                string_value = self.read_string(char)
-                self.tokens.append(
-                    Token(TokenType.STRING, string_value, start_line, start_column)
-                )
-
-            # Numbers
-            elif char.isdigit() or (
-                char == "-" and self.peek(1) and self.peek(1).isdigit()
-            ):
-                number_value = self.read_number()
-                self.tokens.append(
-                    Token(TokenType.NUMBER, number_value, start_line, start_column)
-                )
-
-            # Identifiers and keywords
-            elif char.isalpha() or char == "_":
-                identifier = self.read_identifier()
-                token_type = self.KEYWORDS.get(identifier.lower(), TokenType.IDENTIFIER)
-                self.tokens.append(
-                    Token(token_type, identifier, start_line, start_column)
-                )
+            # Handle numbers and identifiers
+            elif self._handle_numbers_and_identifiers(char, start_line, start_column):
+                continue
 
             # Two-character operators
-            elif char == "-" and self.peek(1) == ">":
-                self.advance()
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.ASSIGN, "->", start_line, start_column)
-                )
+            elif self._handle_two_char_operators(char, start_line, start_column):
+                continue
 
-            elif char == "<" and self.peek(1) == "<":
-                self.advance()
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RECURSE_UP_REL, "<<", start_line, start_column)
-                )
-
-            elif char == ">" and self.peek(1) == ">":
-                self.advance()
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RECURSE_DOWN_REL, ">>", start_line, start_column)
-                )
-
-            elif char == "!" and self.peek(1) == "=":
-                self.advance()
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.NOT_EQUALS, "!=", start_line, start_column)
-                )
+            # Brace tokens (including template placeholders)
+            elif self._handle_brace_tokens(char, start_line, start_column):
+                continue
 
             # Single-character tokens
-            elif char == ";":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.SEMICOLON, ";", start_line, start_column)
-                )
-
-            elif char == ",":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.COMMA, ",", start_line, start_column)
-                )
-
-            elif char == ".":
-                self.advance()
-                self.tokens.append(Token(TokenType.DOT, ".", start_line, start_column))
-
-            elif char == ":":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.COLON, ":", start_line, start_column)
-                )
-
-            elif char == "(":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.LPAREN, "(", start_line, start_column)
-                )
-
-            elif char == ")":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RPAREN, ")", start_line, start_column)
-                )
-
-            elif char == "[":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.LBRACKET, "[", start_line, start_column)
-                )
-
-            elif char == "]":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RBRACKET, "]", start_line, start_column)
-                )
-
-            elif char == "{":
-                # Check for template placeholder {{variable}}
-                if self.peek(1) == "{":
-                    template_value = self.read_template_placeholder()
-                    self.tokens.append(
-                        Token(
-                            TokenType.TEMPLATE_PLACEHOLDER,
-                            template_value,
-                            start_line,
-                            start_column,
-                        )
-                    )
-                else:
-                    self.advance()
-                    self.tokens.append(
-                        Token(TokenType.LBRACE, "{", start_line, start_column)
-                    )
-
-            elif char == "}":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RBRACE, "}", start_line, start_column)
-                )
-
-            elif char == "<":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RECURSE_UP, "<", start_line, start_column)
-                )
-
-            elif char == ">":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.RECURSE_DOWN, ">", start_line, start_column)
-                )
-
-            elif char == "-":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.UNION_MINUS, "-", start_line, start_column)
-                )
-
-            elif char == "~":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.REGEX_OP, "~", start_line, start_column)
-                )
-
-            elif char == "!":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.NOT_OP, "!", start_line, start_column)
-                )
-
-            elif char == "=":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.EQUALS, "=", start_line, start_column)
-                )
+            elif self._handle_single_char_tokens(char, start_line, start_column):
+                continue
 
             else:
                 self.error(f"Unexpected character: '{char}'")
@@ -581,7 +574,9 @@ class OverpassQLParser:
             )
         else:
             current = self.current_token()
-            error_msg = f"Syntax Error at line {current.line}, column {current.column}: {message}"
+            error_msg = f"Syntax Error at line {
+                current.line}, column {
+                current.column}: {message}"
         self.errors.append(error_msg)
 
     def warning(self, message: str, token: Optional[Token] = None):
@@ -634,6 +629,120 @@ class OverpassQLParser:
         """Check if current token matches any of the given types."""
         return self.current_token().type in token_types
 
+    def _parse_timeout_maxsize_setting(self, setting_token: Token) -> None:
+        """Parse timeout or maxsize settings."""
+        self.expect(TokenType.COLON)
+
+        if not self.match(TokenType.NUMBER):
+            self.error(f"Expected number after {setting_token.value}:")
+        else:
+            number = self.advance()
+            try:
+                value = int(number.value)
+                if value < 0:
+                    self.error(
+                        f"{setting_token.value} must be non-negative"
+                    )
+            except ValueError:
+                self.error(
+                    f"Invalid number for {setting_token.value}: "
+                    f"{number.value}"
+                )
+
+    def _parse_bbox_setting(self) -> None:
+        """Parse bbox setting with coordinate validation."""
+        self.expect(TokenType.COLON)
+
+        # Parse bbox coordinates: south,west,north,east
+        for i in range(4):
+            if i > 0:
+                self.expect(TokenType.COMMA)
+
+            if not self.match(TokenType.NUMBER):
+                self.error(f"Expected coordinate {i + 1} in bbox")
+            else:
+                coord = self.advance()
+                try:
+                    coord_val = float(coord.value)
+                    if i in [0, 2]:  # latitude values
+                        if not -90 <= coord_val <= 90:
+                            self.error(
+                                f"Latitude must be between -90 and 90: "
+                                f"{coord_val}"
+                            )
+                    else:  # longitude values
+                        if not -180 <= coord_val <= 180:
+                            self.error(
+                                f"Longitude must be between -180 and 180: "
+                                f"{coord_val}"
+                            )
+                except ValueError:
+                    self.error(f"Invalid coordinate: {coord.value}")
+
+    def _parse_date_setting(self, setting_token: Token) -> None:
+        """Parse date, diff, or adiff settings."""
+        self.expect(TokenType.COLON)
+
+        if not self.match(TokenType.STRING):
+            self.error(f"Expected date string after {setting_token.value}:")
+        else:
+            date_str = self.advance()
+            # Basic ISO 8601 date format validation
+            if not re.match(
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_str.value
+            ):
+                self.error(
+                    "Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ"
+                )
+
+    def _parse_unknown_setting(self, setting_token: Token) -> None:
+        """Parse unknown settings with warning."""
+        self.warning(f"Unknown setting: {setting_token.value}")
+
+        if self.match(TokenType.COLON):
+            self.advance()
+            # Skip the value
+            if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+                self.advance()
+
+    def _parse_out_setting(self) -> None:
+        """Parse out setting in settings block."""
+        self.advance()  # Skip 'out'
+        self.expect(TokenType.COLON)
+
+        if self.match(TokenType.IDENTIFIER):
+            format_token = self.advance()
+            format_name = format_token.value.lower()
+
+            if format_name not in self.OUTPUT_FORMATS:
+                self.error(f"Invalid output format: {format_token.value}")
+
+            # Handle CSV with parameters: csv(fields; options; separator)
+            if format_name == "csv" and self.match(TokenType.LPAREN):
+                self._parse_csv_parameters()
+
+        elif self.match(TokenType.STRING):
+            # Could be csv with parameters
+            self.advance()
+        else:
+            self.error("Expected output format after 'out:'")
+
+    def _parse_csv_parameters(self) -> None:
+        """Parse CSV parameters in parentheses."""
+        self.advance()  # Skip (
+
+        # Parse CSV parameters - this is simplified parsing
+        # In real Overpass QL, this has complex field specifications
+        while not self.match(TokenType.RPAREN, TokenType.EOF):
+            # Skip any tokens until we find the closing paren
+            # This handles field lists, options, separators, etc.
+            self.advance()
+
+        if self.match(TokenType.RPAREN):
+            self.advance()  # Skip )
+        else:
+            self.error("Expected ')' after CSV parameters")
+
     def parse_settings(self) -> bool:
         """Parse settings statement."""
         if not self.match(TokenType.LBRACKET):
@@ -657,124 +766,16 @@ class OverpassQLParser:
                 setting_name = setting_token.value.lower()
 
                 if setting_name in ["timeout", "maxsize"]:
-                    self.expect(TokenType.COLON)
-
-                    if not self.match(TokenType.NUMBER):
-                        self.error(
-                            f"Expected number after {
-                                setting_token.value}:"
-                        )
-                    else:
-                        number = self.advance()
-                        try:
-                            value = int(number.value)
-                            if value < 0:
-                                self.error(
-                                    f"{setting_token.value} must be non-negative"
-                                )
-                        except ValueError:
-                            self.error(
-                                f"Invalid number for {
-                                    setting_token.value}: {
-                                    number.value}"
-                            )
-
+                    self._parse_timeout_maxsize_setting(setting_token)
                 elif setting_name == "bbox":
-                    self.expect(TokenType.COLON)
-
-                    # Parse bbox coordinates: south,west,north,east
-                    for i in range(4):
-                        if i > 0:
-                            self.expect(TokenType.COMMA)
-
-                        if not self.match(TokenType.NUMBER):
-                            self.error(f"Expected coordinate {i + 1} in bbox")
-                        else:
-                            coord = self.advance()
-                            try:
-                                coord_val = float(coord.value)
-                                if i in [0, 2]:  # latitude values
-                                    if not -90 <= coord_val <= 90:
-                                        self.error(
-                                            f"Latitude must be between -90 and "
-                                            f"90: {coord_val}"
-                                        )
-                                else:  # longitude values
-                                    if not -180 <= coord_val <= 180:
-                                        self.error(
-                                            f"Longitude must be between -180 and "
-                                            f"180: {coord_val}"
-                                        )
-                            except ValueError:
-                                self.error(
-                                    f"Invalid coordinate: {
-                                        coord.value}"
-                                )
-
+                    self._parse_bbox_setting()
                 elif setting_name in ["date", "diff", "adiff"]:
-                    self.expect(TokenType.COLON)
-
-                    if not self.match(TokenType.STRING):
-                        self.error(
-                            f"Expected date string after {
-                                setting_token.value}:"
-                        )
-                    else:
-                        date_str = self.advance()
-                        # Basic ISO 8601 date format validation
-                        if not re.match(
-                            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_str.value
-                        ):
-                            self.error(
-                                "Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ"
-                            )
-
+                    self._parse_date_setting(setting_token)
                 else:
-                    # Unknown setting
-                    self.warning(f"Unknown setting: {setting_token.value}")
-
-                    if self.match(TokenType.COLON):
-                        self.advance()
-                        # Skip the value
-                        if self.match(
-                            TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER
-                        ):
-                            self.advance()
+                    self._parse_unknown_setting(setting_token)
 
             elif self.match(TokenType.OUT):
-                # Handle 'out' keyword as setting
-                self.advance()  # Skip 'out'
-                self.expect(TokenType.COLON)
-
-                if self.match(TokenType.IDENTIFIER):
-                    format_token = self.advance()
-                    format_name = format_token.value.lower()
-
-                    if format_name not in self.OUTPUT_FORMATS:
-                        self.error(f"Invalid output format: {format_token.value}")
-
-                    # Handle CSV with parameters: csv(fields; options; separator)
-                    if format_name == "csv" and self.match(TokenType.LPAREN):
-                        self.advance()  # Skip (
-
-                        # Parse CSV parameters - this is simplified parsing
-                        # In real Overpass QL, this has complex field specifications
-                        while not self.match(TokenType.RPAREN, TokenType.EOF):
-                            # Skip any tokens until we find the closing paren
-                            # This handles field lists, options, separators, etc.
-                            self.advance()
-
-                        if self.match(TokenType.RPAREN):
-                            self.advance()  # Skip )
-                        else:
-                            self.error("Expected ')' after CSV parameters")
-
-                elif self.match(TokenType.STRING):
-                    # Could be csv with parameters
-                    self.advance()
-                else:
-                    self.error("Expected output format after 'out:'")
-
+                self._parse_out_setting()
             else:
                 self.error("Expected setting name in settings block")
                 break
@@ -783,6 +784,71 @@ class OverpassQLParser:
 
         self.expect(TokenType.SEMICOLON)
         return True
+
+    def _parse_regex_flag(self) -> None:
+        """Parse regex case insensitive flag."""
+        if self.match(TokenType.COMMA):
+            self.advance()
+            if self.match(TokenType.IDENTIFIER):
+                flag = self.advance()
+                if flag.value.lower() != "i":
+                    self.error(f"Invalid regex flag: {flag.value}")
+
+    def _validate_and_parse_regex_value(self, op_token: Token,
+                                        value_token: Token) -> None:
+        """Validate regex pattern and parse optional flag."""
+        if op_token.type == TokenType.REGEX_OP:
+            try:
+                re.compile(value_token.value)
+            except re.error as e:
+                self.error(f"Invalid regex pattern: {e}")
+
+            # Check for case insensitive flag for regex
+            if op_token.type == TokenType.REGEX_OP:
+                self._parse_regex_flag()
+
+    def _parse_key_value_pattern(self) -> None:
+        """Parse key-value pattern like [key=value] or [key~regex]."""
+        self.advance()  # Skip key
+
+        # Check for operator
+        if self.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.REGEX_OP):
+            op_token = self.advance()
+
+            # Parse value
+            if self.match(TokenType.STRING, TokenType.IDENTIFIER, TokenType.NUMBER):
+                value_token = self.advance()
+                self._validate_and_parse_regex_value(op_token, value_token)
+            else:
+                self.error("Expected value after operator in tag filter")
+
+    def _parse_dual_regex_pattern(self) -> None:
+        """Parse dual regex pattern like [~"key-regex"~"value-regex"]."""
+        self.advance()  # Skip first ~
+
+        if not self.match(TokenType.STRING):
+            self.error("Expected regex pattern after ~")
+        else:
+            key_regex = self.advance()
+            try:
+                re.compile(key_regex.value)
+            except re.error as e:
+                self.error(f"Invalid key regex pattern: {e}")
+
+        if self.match(TokenType.REGEX_OP):
+            self.advance()  # Skip second ~
+
+            if not self.match(TokenType.STRING):
+                self.error("Expected value regex pattern after second ~")
+            else:
+                value_regex = self.advance()
+                try:
+                    re.compile(value_regex.value)
+                except re.error as e:
+                    self.error(f"Invalid value regex pattern: {e}")
+
+            # Check for case insensitive flag
+            self._parse_regex_flag()
 
     def parse_tag_filter(self):
         """Parse tag filter [key] or [key=value] or [key~regex]."""
@@ -794,71 +860,195 @@ class OverpassQLParser:
 
         # Parse key (can be string or identifier)
         if self.match(TokenType.STRING, TokenType.IDENTIFIER):
-            self.advance()  # Skip key
-
-            # Check for operator
-            if self.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.REGEX_OP):
-                op_token = self.advance()
-
-                # Parse value
-                if self.match(TokenType.STRING, TokenType.IDENTIFIER, TokenType.NUMBER):
-                    value_token = self.advance()
-
-                    # For regex operator, validate regex
-                    if op_token.type == TokenType.REGEX_OP:
-                        try:
-                            re.compile(value_token.value)
-                        except re.error as e:
-                            self.error(f"Invalid regex pattern: {e}")
-
-                    # Check for case insensitive flag for regex
-                    if op_token.type == TokenType.REGEX_OP and self.match(
-                        TokenType.COMMA
-                    ):
-                        self.advance()  # Skip comma
-                        if self.match(TokenType.IDENTIFIER):
-                            flag = self.advance()
-                            if flag.value.lower() != "i":
-                                self.error(f"Invalid regex flag: {flag.value}")
-                else:
-                    self.error("Expected value after operator in tag filter")
-
+            self._parse_key_value_pattern()
         elif self.match(TokenType.REGEX_OP):
-            # Pattern like [~"name-regex"~"value-regex"]
-            self.advance()  # Skip first ~
-
-            if not self.match(TokenType.STRING):
-                self.error("Expected regex pattern after ~")
-            else:
-                key_regex = self.advance()
-                try:
-                    re.compile(key_regex.value)
-                except re.error as e:
-                    self.error(f"Invalid key regex pattern: {e}")
-
-            if self.match(TokenType.REGEX_OP):
-                self.advance()  # Skip second ~
-
-                if not self.match(TokenType.STRING):
-                    self.error("Expected value regex pattern after second ~")
-                else:
-                    value_regex = self.advance()
-                    try:
-                        re.compile(value_regex.value)
-                    except re.error as e:
-                        self.error(f"Invalid value regex pattern: {e}")
-
-                # Check for case insensitive flag
-                if self.match(TokenType.COMMA):
-                    self.advance()
-                    if self.match(TokenType.IDENTIFIER):
-                        flag = self.advance()
-                        if flag.value.lower() != "i":
-                            self.error(f"Invalid regex flag: {flag.value}")
+            self._parse_dual_regex_pattern()
         else:
             self.error("Expected key name in tag filter")
 
         self.expect(TokenType.RBRACKET)
+
+    def _validate_coordinate(self, coord: Token, coord_idx: int) -> None:
+        """Validate a single coordinate value."""
+        try:
+            coord_val = float(coord.value)
+            if coord_idx == 0:  # latitude
+                if not -90 <= coord_val <= 90:
+                    self.error(
+                        f"Latitude must be between -90 and 90: {coord_val}"
+                    )
+            else:  # longitude
+                if not -180 <= coord_val <= 180:
+                    self.error(
+                        f"Longitude must be between -180 and 180: {coord_val}"
+                    )
+        except ValueError:
+            self.error(f"Invalid coordinate: {coord.value}")
+
+    def _parse_around_coordinates(self) -> None:
+        """Parse coordinates for around filter."""
+        # Parse at least one coordinate pair
+        for coord_idx in range(2):  # lat, lng
+            if coord_idx > 0:
+                self.expect(TokenType.COMMA)
+
+            if not self.match(TokenType.NUMBER):
+                coord_type = 'latitude' if coord_idx == 0 else 'longitude'
+                self.error(f"Expected {coord_type}")
+            else:
+                coord = self.advance()
+                self._validate_coordinate(coord, coord_idx)
+
+        # Check for additional coordinate pairs (linestring)
+        while self.match(TokenType.COMMA):
+            self.advance()
+            if self.match(TokenType.NUMBER):
+                self.advance()  # Additional coordinates
+            else:
+                break
+
+    def _parse_around_filter(self) -> None:
+        """Parse around filter with radius and coordinates."""
+        if self.match(TokenType.COLON):
+            self.advance()
+
+            # Parse radius
+            if not self.match(TokenType.NUMBER):
+                self.error("Expected radius after 'around:'")
+            else:
+                radius = self.advance()
+                try:
+                    radius_val = float(radius.value)
+                    if radius_val < 0:
+                        self.error("Radius must be non-negative")
+                except ValueError:
+                    self.error(f"Invalid radius: {radius.value}")
+
+            # Parse coordinates (lat,lng or multiple points)
+            self.expect(TokenType.COMMA)
+            self._parse_around_coordinates()
+
+    def _parse_poly_filter(self) -> None:
+        """Parse polygon filter."""
+        self.expect(TokenType.COLON)
+        if not self.match(TokenType.STRING):
+            self.error("Expected polygon coordinate string after 'poly:'")
+        else:
+            poly_str = self.advance()
+            # Basic validation of polygon string format
+            coords = poly_str.value.split()
+            if len(coords) < 6 or len(coords) % 2 != 0:
+                self.error("Polygon must have at least 3 coordinate pairs")
+
+    def _parse_area_filter(self) -> None:
+        """Parse area filter."""
+        # area or area.setname or area:id
+        if self.match(TokenType.DOT):
+            self.advance()  # Skip .
+            if not self.match(TokenType.IDENTIFIER):
+                self.error("Expected set name after 'area.'")
+            else:
+                self.advance()  # Skip set name
+        elif self.match(TokenType.COLON):
+            self.advance()  # Skip :
+            if not self.match(TokenType.NUMBER):
+                self.error("Expected area ID after 'area:'")
+            else:
+                self.advance()  # Skip area ID
+
+    def _parse_member_filters(self, filter_name: str) -> None:
+        """Parse member filters (w, r, bn, bw, br)."""
+        # Handle optional .setname and :role
+        if self.match(TokenType.DOT):
+            self.advance()
+            if self.match(TokenType.IDENTIFIER):
+                self.advance()
+        if self.match(TokenType.COLON):
+            self.advance()
+            if self.match(TokenType.STRING):
+                self.advance()
+
+    def _parse_other_named_filters(self, filter_name: str) -> None:
+        """Parse other named spatial filters."""
+        # Define valid spatial filter identifiers
+        valid_spatial_filters = {
+            "w", "r", "bn", "bw", "br",  # member filters
+            "bbox", "id", "newer", "user", "uid", "changed",  # other valid filters
+            "nds", "ndr", "pivot",  # relation member filters
+        }
+
+        if filter_name not in valid_spatial_filters:
+            self.error(f"Invalid spatial filter: '{filter_name}'")
+            return
+
+        # Handle member filters (w, r, bn, bw, br)
+        if filter_name in {"w", "r", "bn", "bw", "br"}:
+            self._parse_member_filters(filter_name)
+        # Handle other filters with parameters
+        elif self.match(TokenType.COLON):
+            self.advance()
+            if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+                self.advance()
+
+    def _validate_bbox_coordinates(self, numbers: list) -> None:
+        """Validate bbox coordinates."""
+        if not (-90 <= numbers[0] <= 90):  # south
+            self.error(f"South latitude must be between -90 and 90: {numbers[0]}")
+        if not (-180 <= numbers[1] <= 180):  # west
+            self.error(f"West longitude must be between -180 and 180: {numbers[1]}")
+        if not (-90 <= numbers[2] <= 90):  # north
+            self.error(f"North latitude must be between -90 and 90: {numbers[2]}")
+        if not (-180 <= numbers[3] <= 180):  # east
+            self.error(f"East longitude must be between -180 and 180: {numbers[3]}")
+
+    def _parse_numeric_filters(self) -> None:
+        """Parse filters that start with numbers (bbox coordinates or ID list)."""
+        numbers = []
+        try:
+            numbers.append(float(self.advance().value))  # First number
+
+            # Count additional numbers
+            while self.match(TokenType.COMMA):
+                self.advance()  # Skip comma
+                if self.match(TokenType.NUMBER):
+                    numbers.append(float(self.advance().value))
+                else:
+                    break
+
+            # Validate if it looks like a bbox (4 coordinates)
+            if len(numbers) == 4:
+                self._validate_bbox_coordinates(numbers)
+        except ValueError as e:
+            self.error(f"Invalid coordinate value: {e}")
+
+    def _parse_id_list_filter(self) -> None:
+        """Parse ID list filter."""
+        if not self.match(TokenType.NUMBER):
+            self.error("Expected ID after 'id:'")
+        else:
+            self.advance()  # First ID
+
+            # Parse additional IDs
+            while self.match(TokenType.COMMA):
+                self.advance()
+                if not self.match(TokenType.NUMBER):
+                    self.error("Expected ID in ID list")
+                else:
+                    self.advance()
+
+    def _parse_identifier_filters(self) -> None:
+        """Parse filters that start with identifiers."""
+        filter_name = self.advance()
+
+        if self.match(TokenType.COLON):
+            self.advance()  # Skip :
+
+            if filter_name.value.lower() == "id":
+                self._parse_id_list_filter()
+            else:
+                # Other filters like newer:"date", user:"name", uid:123
+                if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+                    self.advance()
 
     def parse_spatial_filter(self):
         """Parse spatial filter like (bbox) or (around:radius,lat,lng)."""
@@ -873,201 +1063,24 @@ class OverpassQLParser:
 
         if self.match(TokenType.IDENTIFIER, TokenType.AREA):
             filter_type = self.advance()
+            filter_name = filter_type.value.lower()
 
-            if filter_type.value.lower() == "around":
-                if self.match(TokenType.COLON):
-                    self.advance()
-
-                    # Parse radius
-                    if not self.match(TokenType.NUMBER):
-                        self.error("Expected radius after 'around:'")
-                    else:
-                        radius = self.advance()
-                        try:
-                            radius_val = float(radius.value)
-                            if radius_val < 0:
-                                self.error("Radius must be non-negative")
-                        except ValueError:
-                            self.error(f"Invalid radius: {radius.value}")
-
-                    # Parse coordinates (lat,lng or multiple points)
-                    self.expect(TokenType.COMMA)
-
-                    # Parse at least one coordinate pair
-                    for coord_idx in range(2):  # lat, lng
-                        if coord_idx > 0:
-                            self.expect(TokenType.COMMA)
-
-                        if not self.match(TokenType.NUMBER):
-                            self.error(
-                                f"Expected {
-                                    'latitude' if coord_idx == 0 else 'longitude'}"
-                            )
-                        else:
-                            coord = self.advance()
-                            try:
-                                coord_val = float(coord.value)
-                                if coord_idx == 0:  # latitude
-                                    if not -90 <= coord_val <= 90:
-                                        self.error(
-                                            f"Latitude must be between -90 and "
-                                            f"90: {coord_val}"
-                                        )
-                                else:  # longitude
-                                    if not -180 <= coord_val <= 180:
-                                        self.error(
-                                            f"Longitude must be between -180 and "
-                                            f"180: {coord_val}"
-                                        )
-                            except ValueError:
-                                self.error(
-                                    f"Invalid coordinate: {
-                                        coord.value}"
-                                )
-
-                    # Check for additional coordinate pairs (linestring)
-                    while self.match(TokenType.COMMA):
-                        self.advance()
-                        if self.match(TokenType.NUMBER):
-                            self.advance()  # Additional coordinates
-                        else:
-                            break
-
-            elif filter_type.value.lower() == "poly":
-                self.expect(TokenType.COLON)
-                if not self.match(TokenType.STRING):
-                    self.error("Expected polygon coordinate string after 'poly:'")
-                else:
-                    poly_str = self.advance()
-                    # Basic validation of polygon string format
-                    coords = poly_str.value.split()
-                    if len(coords) < 6 or len(coords) % 2 != 0:
-                        self.error("Polygon must have at least 3 coordinate pairs")
-
-            elif filter_type.value.lower() == "area":
-                # area or area.setname or area:id
-                if self.match(TokenType.DOT):
-                    self.advance()  # Skip .
-                    if not self.match(TokenType.IDENTIFIER):
-                        self.error("Expected set name after 'area.'")
-                    else:
-                        self.advance()  # Skip set name
-                elif self.match(TokenType.COLON):
-                    self.advance()  # Skip :
-                    if not self.match(TokenType.NUMBER):
-                        self.error("Expected area ID after 'area:'")
-                    else:
-                        self.advance()  # Skip area ID
-
+            if filter_name == "around":
+                self._parse_around_filter()
+            elif filter_name == "poly":
+                self._parse_poly_filter()
+            elif filter_name == "area":
+                self._parse_area_filter()
             else:
-                # Could be other identifier-based filters
-                filter_name = filter_type.value.lower()
-
-                # Define valid spatial filter identifiers
-                valid_spatial_filters = {
-                    "w",
-                    "r",
-                    "bn",
-                    "bw",
-                    "br",  # member filters
-                    "bbox",
-                    "id",
-                    "newer",
-                    "user",
-                    "uid",
-                    "changed",  # other valid filters
-                    "nds",
-                    "ndr",
-                    "pivot",  # relation member filters
-                }
-
-                if filter_name not in valid_spatial_filters:
-                    self.error(f"Invalid spatial filter: '{filter_name}'")
-                    return
-
-                # Handle member filters (w, r, bn, bw, br)
-                if filter_name in {"w", "r", "bn", "bw", "br"}:
-                    # Handle optional .setname and :role
-                    if self.match(TokenType.DOT):
-                        self.advance()
-                        if self.match(TokenType.IDENTIFIER):
-                            self.advance()
-                    if self.match(TokenType.COLON):
-                        self.advance()
-                        if self.match(TokenType.STRING):
-                            self.advance()
-                # Handle other filters with parameters
-                elif self.match(TokenType.COLON):
-                    self.advance()
-                    if self.match(
-                        TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER
-                    ):
-                        self.advance()
+                self._parse_other_named_filters(filter_name)
 
         # Could also be bbox coordinates or ID list
         elif self.match(TokenType.NUMBER):
-            # Could be bbox (4 coordinates) or ID list or single ID
-            numbers = []
-            try:
-                numbers.append(float(self.advance().value))  # First number
-
-                # Count additional numbers
-                while self.match(TokenType.COMMA):
-                    self.advance()  # Skip comma
-                    if self.match(TokenType.NUMBER):
-                        numbers.append(float(self.advance().value))
-                    else:
-                        break
-
-                # Validate if it looks like a bbox (4 coordinates)
-                if len(numbers) == 4:
-                    # Validate bbox coordinates
-                    if not (-90 <= numbers[0] <= 90):  # south
-                        self.error(
-                            f"South latitude must be between -90 and 90: {numbers[0]}"
-                        )
-                    if not (-180 <= numbers[1] <= 180):  # west
-                        self.error(
-                            f"West longitude must be between -180 and 180: {numbers[1]}"
-                        )
-                    if not (-90 <= numbers[2] <= 90):  # north
-                        self.error(
-                            f"North latitude must be between -90 and 90: {numbers[2]}"
-                        )
-                    if not (-180 <= numbers[3] <= 180):  # east
-                        self.error(
-                            f"East longitude must be between -180 and 180: {numbers[3]}"
-                        )
-            except ValueError as e:
-                self.error(f"Invalid coordinate value: {e}")
+            self._parse_numeric_filters()
 
         # Handle special filter formats like id:123,456
         elif self.match(TokenType.IDENTIFIER):
-            filter_name = self.advance()
-
-            if self.match(TokenType.COLON):
-                self.advance()  # Skip :
-
-                if filter_name.value.lower() == "id":
-                    # Parse ID list
-                    if not self.match(TokenType.NUMBER):
-                        self.error("Expected ID after 'id:'")
-                    else:
-                        self.advance()  # First ID
-
-                        # Parse additional IDs
-                        while self.match(TokenType.COMMA):
-                            self.advance()
-                            if not self.match(TokenType.NUMBER):
-                                self.error("Expected ID in ID list")
-                            else:
-                                self.advance()
-                else:
-                    # Other filters like newer:"date", user:"name", uid:123
-                    if self.match(
-                        TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER
-                    ):
-                        self.advance()
+            self._parse_identifier_filters()
 
         self.expect(TokenType.RPAREN)
 
@@ -1111,14 +1124,8 @@ class OverpassQLParser:
         self.expect(TokenType.SEMICOLON)
         return True
 
-    def parse_out_statement(self):
-        """Parse out statement."""
-        if not self.match(TokenType.OUT):
-            return False
-
-        out_token = self.advance()
-
-        # Handle input set prefix
+    def _handle_out_set_prefix(self, out_token: Token) -> None:
+        """Handle input set prefix in out statement."""
         if self.current_token().line == out_token.line and self.match(TokenType.DOT):
             # This is actually ".setname out" format
             self.pos -= 1  # Go back
@@ -1135,36 +1142,49 @@ class OverpassQLParser:
             # Now expect 'out'
             self.expect(TokenType.OUT)
 
-        # Parse out parameters
+    def _parse_out_identifier_param(self, mode_specified: bool) -> bool:
+        """Parse identifier parameters in out statement.
+
+        Returns updated mode_specified."""
+        param = self.advance()
+        param_lower = param.value.lower()
+
+        if param_lower in self.OUT_MODES:
+            if mode_specified:
+                self.error("Multiple output modes specified")
+            return True
+        elif param_lower in self.OUT_MODIFIERS:
+            pass  # Valid modifier
+        elif param_lower == "count":
+            # Special case for 'out count'
+            return mode_specified  # Don't change mode_specified, just return
+        else:
+            # Don't warn about unknown parameters, might be valid extensions
+            pass
+
+        return mode_specified
+
+    def _parse_out_number_param(self) -> None:
+        """Parse number parameters (limits) in out statement."""
+        limit = self.advance()
+        try:
+            limit_val = int(limit.value)
+            if limit_val < 0:
+                self.error("Output limit must be non-negative")
+        except ValueError:
+            self.error(f"Invalid output limit: {limit.value}")
+
+    def _parse_out_parameters(self) -> None:
+        """Parse out statement parameters."""
         mode_specified = False
         while not self.match(TokenType.SEMICOLON, TokenType.EOF):
             if self.match(TokenType.IDENTIFIER):
-                param = self.advance()
-                param_lower = param.value.lower()
-
-                if param_lower in self.OUT_MODES:
-                    if mode_specified:
-                        self.error("Multiple output modes specified")
-                    mode_specified = True
-                elif param_lower in self.OUT_MODIFIERS:
-                    pass  # Valid modifier
-                elif param_lower == "count":
-                    # Special case for 'out count'
+                mode_specified = self._parse_out_identifier_param(mode_specified)
+                if self.current_token().value.lower() == "count":
                     break
-                else:
-                    # Don't warn about unknown parameters, might be valid
-                    # extensions
-                    pass
 
             elif self.match(TokenType.NUMBER):
-                # Limit parameter
-                limit = self.advance()
-                try:
-                    limit_val = int(limit.value)
-                    if limit_val < 0:
-                        self.error("Output limit must be non-negative")
-                except ValueError:
-                    self.error(f"Invalid output limit: {limit.value}")
+                self._parse_out_number_param()
 
             elif self.match(TokenType.LPAREN):
                 # Bounding box in out statement
@@ -1172,6 +1192,19 @@ class OverpassQLParser:
 
             else:
                 break
+
+    def parse_out_statement(self):
+        """Parse out statement."""
+        if not self.match(TokenType.OUT):
+            return False
+
+        out_token = self.advance()
+
+        # Handle input set prefix
+        self._handle_out_set_prefix(out_token)
+
+        # Parse out parameters
+        self._parse_out_parameters()
 
         self.expect(TokenType.SEMICOLON)
         return True
@@ -1211,6 +1244,71 @@ class OverpassQLParser:
         self.expect(TokenType.SEMICOLON)
         return True
 
+    def _parse_block_set_specifications(self) -> None:
+        """Parse input/output set specifications for block statements."""
+        # Handle input set
+        if self.match(TokenType.DOT):
+            self.advance()
+            if not self.match(TokenType.IDENTIFIER):
+                self.error("Expected set name after '.'")
+            else:
+                self.advance()
+
+        # Handle output set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if not self.match(TokenType.DOT):
+                self.error("Expected '.' after '->'")
+            else:
+                self.advance()
+                if not self.match(TokenType.IDENTIFIER):
+                    self.error("Expected set name after '.'")
+                else:
+                    self.advance()
+
+    def _parse_block_parameters(self, block_type: Token) -> None:
+        """Parse parameters for specific block types."""
+        if block_type.type in {
+            TokenType.IF,
+            TokenType.FOR,
+            TokenType.RETRO,
+            TokenType.COMPARE,
+        }:
+            if self.match(TokenType.LPAREN):
+                self.advance()
+                # Parse evaluator expression (simplified)
+                while not self.match(TokenType.RPAREN, TokenType.EOF):
+                    self.advance()
+                self.expect(TokenType.RPAREN)
+
+    def _parse_block_body(self) -> bool:
+        """Parse block body and return whether braces were used."""
+        has_braces = False
+        if self.match(TokenType.LBRACE):
+            has_braces = True
+            self.advance()
+
+            while not self.match(TokenType.RBRACE, TokenType.EOF):
+                if not self.parse_statement():
+                    break
+
+            self.expect(TokenType.RBRACE)
+        return has_braces
+
+    def _parse_else_clause(self) -> bool:
+        """Parse else clause for if statements. Returns whether braces were used."""
+        has_braces = False
+        if self.match(TokenType.ELSE):
+            self.advance()
+            if self.match(TokenType.LBRACE):
+                has_braces = True
+                self.advance()
+                while not self.match(TokenType.RBRACE, TokenType.EOF):
+                    if not self.parse_statement():
+                        break
+                self.expect(TokenType.RBRACE)
+        return has_braces
+
     def parse_block_statement(self):
         """Parse block statements like if, foreach, for, etc."""
         if not self.match(
@@ -1226,16 +1324,27 @@ class OverpassQLParser:
         block_type = self.advance()
 
         # Handle input/output set specifications
-        if self.match(TokenType.DOT):
-            # Input set
-            self.advance()
-            if not self.match(TokenType.IDENTIFIER):
-                self.error("Expected set name after '.'")
-            else:
-                self.advance()
+        self._parse_block_set_specifications()
 
+        # Parse parameters for specific block types
+        self._parse_block_parameters(block_type)
+
+        # Parse block body
+        has_braces = self._parse_block_body()
+
+        # Handle else clause for if statements
+        if block_type.type == TokenType.IF:
+            has_braces = self._parse_else_clause() or has_braces
+
+        # Only expect semicolon if we didn't use braces
+        if not has_braces:
+            self.expect(TokenType.SEMICOLON)
+
+        return True
+
+    def _parse_set_assignment(self) -> None:
+        """Parse output set assignment (->setname)."""
         if self.match(TokenType.ASSIGN):
-            # Output set
             self.advance()
             if not self.match(TokenType.DOT):
                 self.error("Expected '.' after '->'")
@@ -1246,52 +1355,17 @@ class OverpassQLParser:
                 else:
                     self.advance()
 
-        # Parse parameters for specific block types
-        if block_type.type in {
-            TokenType.IF,
-            TokenType.FOR,
-            TokenType.RETRO,
-            TokenType.COMPARE,
-        }:
-            if self.match(TokenType.LPAREN):
-                self.advance()
-                # Parse evaluator expression (simplified)
-                while not self.match(TokenType.RPAREN, TokenType.EOF):
-                    self.advance()
-                self.expect(TokenType.RPAREN)
-
-        # Parse block body
-        has_braces = False
-        if self.match(TokenType.LBRACE):
-            has_braces = True
+    def _parse_input_set(self) -> None:
+        """Parse input set specification (.setname)."""
+        if self.match(TokenType.DOT):
             self.advance()
-
-            while not self.match(TokenType.RBRACE, TokenType.EOF):
-                if not self.parse_statement():
-                    break
-
-            self.expect(TokenType.RBRACE)
-
-        # Handle else clause for if statements
-        if block_type.type == TokenType.IF and self.match(TokenType.ELSE):
-            self.advance()
-            if self.match(TokenType.LBRACE):
-                has_braces = True
+            if not self.match(TokenType.IDENTIFIER):
+                self.error("Expected set name after '.'")
+            else:
                 self.advance()
-                while not self.match(TokenType.RBRACE, TokenType.EOF):
-                    if not self.parse_statement():
-                        break
-                self.expect(TokenType.RBRACE)
 
-        # Only expect semicolon if we didn't use braces
-        if not has_braces:
-            self.expect(TokenType.SEMICOLON)
-
-        return True
-
-    def parse_simple_statement(self):
-        """Parse simple statements like recursion operators, is_in, etc."""
-        # Recursion operators
+    def _parse_recursion_statement(self) -> bool:
+        """Parse recursion operators."""
         if self.match(
             TokenType.RECURSE_UP,
             TokenType.RECURSE_UP_REL,
@@ -1301,68 +1375,53 @@ class OverpassQLParser:
             self.advance()  # Skip recursion operator
 
             # Handle input set
-            if self.match(TokenType.DOT):
-                self.advance()
-                if not self.match(TokenType.IDENTIFIER):
-                    self.error("Expected set name after '.'")
-                else:
-                    self.advance()
+            self._parse_input_set()
 
             # Handle output assignment
-            if self.match(TokenType.ASSIGN):
-                self.advance()
-                if not self.match(TokenType.DOT):
-                    self.error("Expected '.' after '->'")
-                else:
-                    self.advance()
-                    if not self.match(TokenType.IDENTIFIER):
-                        self.error("Expected set name after '.'")
-                    else:
-                        self.advance()
+            self._parse_set_assignment()
 
             self.expect(TokenType.SEMICOLON)
             return True
+        return False
 
-        # is_in statement
-        elif self.match(TokenType.IS_IN):
+    def _parse_is_in_coordinates(self) -> None:
+        """Parse coordinates for is_in statement."""
+        if self.match(TokenType.LPAREN):
+            self.advance()
+
+            # Parse lat, lng
+            if not self.match(TokenType.NUMBER):
+                self.error("Expected latitude in is_in statement")
+            else:
+                self.advance()
+
+            self.expect(TokenType.COMMA)
+
+            if not self.match(TokenType.NUMBER):
+                self.error("Expected longitude in is_in statement")
+            else:
+                self.advance()
+
+            self.expect(TokenType.RPAREN)
+
+    def _parse_is_in_statement(self) -> bool:
+        """Parse is_in statement."""
+        if self.match(TokenType.IS_IN):
             self.advance()
 
             # Handle coordinates
-            if self.match(TokenType.LPAREN):
-                self.advance()
-
-                # Parse lat, lng
-                if not self.match(TokenType.NUMBER):
-                    self.error("Expected latitude in is_in statement")
-                else:
-                    self.advance()
-
-                self.expect(TokenType.COMMA)
-
-                if not self.match(TokenType.NUMBER):
-                    self.error("Expected longitude in is_in statement")
-                else:
-                    self.advance()
-
-                self.expect(TokenType.RPAREN)
+            self._parse_is_in_coordinates()
 
             # Handle output assignment
-            if self.match(TokenType.ASSIGN):
-                self.advance()
-                if not self.match(TokenType.DOT):
-                    self.error("Expected '.' after '->'")
-                else:
-                    self.advance()
-                    if not self.match(TokenType.IDENTIFIER):
-                        self.error("Expected set name after '.'")
-                    else:
-                        self.advance()
+            self._parse_set_assignment()
 
             self.expect(TokenType.SEMICOLON)
             return True
+        return False
 
-        # Set reference (.setname;)
-        elif self.match(TokenType.DOT):
+    def _parse_set_reference(self) -> bool:
+        """Parse set reference (.setname;)."""
+        if self.match(TokenType.DOT):
             self.advance()
             if not self.match(TokenType.IDENTIFIER):
                 self.error("Expected set name after '.'")
@@ -1370,6 +1429,17 @@ class OverpassQLParser:
                 self.advance()
 
             self.expect(TokenType.SEMICOLON)
+            return True
+        return False
+
+    def parse_simple_statement(self):
+        """Parse simple statements like recursion operators, is_in, etc."""
+        # Try different statement types
+        if self._parse_recursion_statement():
+            return True
+        elif self._parse_is_in_statement():
+            return True
+        elif self._parse_set_reference():
             return True
 
         return False
