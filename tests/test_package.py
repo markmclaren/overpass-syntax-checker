@@ -67,10 +67,7 @@ def test_complex_valid_queries():
 
     for query in complex_queries:
         result = checker.check_syntax(query)
-        assert result[
-            "valid"
-        ], f"Complex query should be valid: {
-            query.strip()}"
+        assert result["valid"], f"Complex query should be valid: {query.strip()}"
 
 
 def test_settings_validation():
