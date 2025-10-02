@@ -93,10 +93,23 @@ def main():
 
     print("\n🧪 Running built-in test suite...")
 
-    # Run the built-in tests
-    from overpass_ql_syntax_checker import run_tests
+    # Run the built-in tests using the CLI
+    import subprocess
+    import sys
 
-    run_tests(checker)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "overpass_ql_checker.cli", "--test"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print("✅ Built-in tests completed successfully!")
+        else:
+            print("❌ Some built-in tests failed")
+            print(result.stdout)
+    except Exception as e:
+        print(f"Error running built-in tests: {e}")
 
 
 if __name__ == "__main__":

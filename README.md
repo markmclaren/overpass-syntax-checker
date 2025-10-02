@@ -13,6 +13,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Support](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 ![Status](https://img.shields.io/badge/status-work--in--progress-orange.svg)
+[![Tests](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/test.yml/badge.svg)](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/test.yml)
+[![Code Quality](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/quality.yml/badge.svg)](https://github.com/markmclaren/overpass-syntax-checker/actions/workflows/quality.yml)
 
 A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL), used to query OpenStreetMap data through the Overpass API.
 
