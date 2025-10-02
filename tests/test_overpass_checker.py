@@ -40,13 +40,21 @@ class TestOverpassQLSyntaxChecker:
             "node[amenity=restaurant]",  # Missing semicolon
             "node[;out;",  # Malformed tag filter
             "way[highway=primary](invalid);out;",  # Invalid spatial filter
-            "[invalid:setting];",  # Invalid setting
         ]
 
         for query in invalid_queries:
             result = self.checker.check_syntax(query)
             assert not result["valid"], f"Query should be invalid: {query}"
             assert len(result["errors"]) > 0, f"Errors expected for: {query}"
+
+    def test_unknown_settings_as_warnings(self):
+        """Test that unknown settings generate warnings, not errors."""
+        query = "[invalid:setting];"
+        result = self.checker.check_syntax(query)
+        assert result["valid"], f"Query with unknown setting should be valid: {query}"
+        assert len(result["warnings"]) > 0, f"Warnings expected for unknown setting: {query}"
+        assert any("Unknown setting" in warning for warning in result["warnings"]), \
+            f"Expected 'Unknown setting' warning: {result['warnings']}"
 
     def test_complex_valid_queries(self):
         """Test complex valid queries."""

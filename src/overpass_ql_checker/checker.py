@@ -76,6 +76,7 @@ class TokenType(Enum):
     NEWLINE = "NEWLINE"
     COMMENT = "COMMENT"
     WHITESPACE = "WHITESPACE"
+    TEMPLATE_PLACEHOLDER = "TEMPLATE_PLACEHOLDER"
 
     # Regex and operators in filters
     REGEX_OP = "~"
@@ -313,6 +314,29 @@ class OverpassQLLexer:
 
         return value
 
+    def read_template_placeholder(self) -> str:
+        """Read a template placeholder like {{bbox}} or {{variable}}."""
+        value = ""
+        
+        # Skip first {{
+        self.advance()  # Skip first {
+        self.advance()  # Skip second {
+        value += "{{"
+        
+        # Read the variable name
+        while self.peek() and self.peek() not in ['}', '\n']:
+            value += self.advance()
+        
+        # Check for closing }}
+        if self.peek() == "}" and self.peek(1) == "}":
+            self.advance()  # Skip first }
+            self.advance()  # Skip second }
+            value += "}}"
+        else:
+            self.error("Unterminated template placeholder, expected '}}'")
+        
+        return value
+
     def tokenize(self) -> List[Token]:
         """Tokenize the input text."""
         self.tokens = []
@@ -446,10 +470,17 @@ class OverpassQLLexer:
                 )
 
             elif char == "{":
-                self.advance()
-                self.tokens.append(
-                    Token(TokenType.LBRACE, "{", start_line, start_column)
-                )
+                # Check for template placeholder {{variable}}
+                if self.peek(1) == "{":
+                    template_value = self.read_template_placeholder()
+                    self.tokens.append(
+                        Token(TokenType.TEMPLATE_PLACEHOLDER, template_value, start_line, start_column)
+                    )
+                else:
+                    self.advance()
+                    self.tokens.append(
+                        Token(TokenType.LBRACE, "{", start_line, start_column)
+                    )
 
             elif char == "}":
                 self.advance()
@@ -714,11 +745,29 @@ class OverpassQLParser:
 
                 if self.match(TokenType.IDENTIFIER):
                     format_token = self.advance()
-                    if format_token.value.lower() not in self.OUTPUT_FORMATS:
+                    format_name = format_token.value.lower()
+                    
+                    if format_name not in self.OUTPUT_FORMATS:
                         self.error(
-                            f"Invalid output format: {
-                                format_token.value}"
+                            f"Invalid output format: {format_token.value}"
                         )
+                    
+                    # Handle CSV with parameters: csv(fields; options; separator)
+                    if format_name == "csv" and self.match(TokenType.LPAREN):
+                        self.advance()  # Skip (
+                        
+                        # Parse CSV parameters - this is simplified parsing
+                        # In real Overpass QL, this has complex field specifications
+                        while not self.match(TokenType.RPAREN, TokenType.EOF):
+                            # Skip any tokens until we find the closing paren
+                            # This handles field lists, options, separators, etc.
+                            self.advance()
+                        
+                        if self.match(TokenType.RPAREN):
+                            self.advance()  # Skip )
+                        else:
+                            self.error("Expected ')' after CSV parameters")
+                            
                 elif self.match(TokenType.STRING):
                     # Could be csv with parameters
                     self.advance()
@@ -814,6 +863,13 @@ class OverpassQLParser:
         """Parse spatial filter like (bbox) or (around:radius,lat,lng)."""
         self.expect(TokenType.LPAREN)
 
+        # Handle template placeholders like {{bbox}}
+        if self.match(TokenType.TEMPLATE_PLACEHOLDER):
+            self.advance()  # Skip the template placeholder token
+            # Template placeholders are valid spatial filters
+            self.expect(TokenType.RPAREN)
+            return
+
         if self.match(TokenType.IDENTIFIER, TokenType.AREA):
             filter_type = self.advance()
 
@@ -905,6 +961,17 @@ class OverpassQLParser:
             else:
                 # Could be other identifier-based filters
                 filter_name = filter_type.value.lower()
+
+                # Define valid spatial filter identifiers
+                valid_spatial_filters = {
+                    "w", "r", "bn", "bw", "br",  # member filters
+                    "bbox", "id", "newer", "user", "uid", "changed",  # other valid filters
+                    "nds", "ndr", "pivot"  # relation member filters
+                }
+
+                if filter_name not in valid_spatial_filters:
+                    self.error(f"Invalid spatial filter: '{filter_name}'")
+                    return
 
                 # Handle member filters (w, r, bn, bw, br)
                 if filter_name in {"w", "r", "bn", "bw", "br"}:
@@ -1182,7 +1249,9 @@ class OverpassQLParser:
                 self.expect(TokenType.RPAREN)
 
         # Parse block body
+        has_braces = False
         if self.match(TokenType.LBRACE):
+            has_braces = True
             self.advance()
 
             while not self.match(TokenType.RBRACE, TokenType.EOF):
@@ -1195,15 +1264,15 @@ class OverpassQLParser:
         if block_type.type == TokenType.IF and self.match(TokenType.ELSE):
             self.advance()
             if self.match(TokenType.LBRACE):
+                has_braces = True
                 self.advance()
                 while not self.match(TokenType.RBRACE, TokenType.EOF):
                     if not self.parse_statement():
                         break
                 self.expect(TokenType.RBRACE)
 
-        if not self.match(
-            TokenType.RBRACE
-        ):  # Only expect semicolon if not ending with }
+        # Only expect semicolon if we didn't use braces
+        if not has_braces:
             self.expect(TokenType.SEMICOLON)
 
         return True

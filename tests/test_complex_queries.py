@@ -167,7 +167,8 @@ def test_complex_queries():
     print(f"\n{'=' * 60}")
     print(f"Complex Query Tests: {passed}/{total} passed ({passed / total * 100:.1f}%)")
 
-    return passed == total
+    # Assert that all tests passed (for pytest)
+    assert passed == total, f"Only {passed} out of {total} tests passed"
 
 
 if __name__ == "__main__":
