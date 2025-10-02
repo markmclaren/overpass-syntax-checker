@@ -117,8 +117,7 @@ class SyntaxError(Exception):
         self.message = message
         self.line = line
         self.column = column
-        super().__init__(
-            f"Syntax Error at line {line}, column {column}: {message}")
+        super().__init__(f"Syntax Error at line {line}, column {column}: {message}")
 
 
 @dataclass
@@ -347,21 +346,15 @@ class OverpassQLLexer:
             elif char == "/" and self.peek(1) in ["/", "*"]:
                 comment_text = self.read_comment()
                 self.tokens.append(
-                    Token(
-                        TokenType.COMMENT,
-                        comment_text,
-                        start_line,
-                        start_column))
+                    Token(TokenType.COMMENT, comment_text, start_line, start_column)
+                )
 
             # String literals
             elif char in ['"', "'"]:
                 string_value = self.read_string(char)
                 self.tokens.append(
-                    Token(
-                        TokenType.STRING,
-                        string_value,
-                        start_line,
-                        start_column))
+                    Token(TokenType.STRING, string_value, start_line, start_column)
+                )
 
             # Numbers
             elif char.isdigit() or (
@@ -369,17 +362,13 @@ class OverpassQLLexer:
             ):
                 number_value = self.read_number()
                 self.tokens.append(
-                    Token(
-                        TokenType.NUMBER,
-                        number_value,
-                        start_line,
-                        start_column))
+                    Token(TokenType.NUMBER, number_value, start_line, start_column)
+                )
 
             # Identifiers and keywords
             elif char.isalpha() or char == "_":
                 identifier = self.read_identifier()
-                token_type = self.KEYWORDS.get(
-                    identifier.lower(), TokenType.IDENTIFIER)
+                token_type = self.KEYWORDS.get(identifier.lower(), TokenType.IDENTIFIER)
                 self.tokens.append(
                     Token(token_type, identifier, start_line, start_column)
                 )
@@ -396,21 +385,15 @@ class OverpassQLLexer:
                 self.advance()
                 self.advance()
                 self.tokens.append(
-                    Token(
-                        TokenType.RECURSE_UP_REL,
-                        "<<",
-                        start_line,
-                        start_column))
+                    Token(TokenType.RECURSE_UP_REL, "<<", start_line, start_column)
+                )
 
             elif char == ">" and self.peek(1) == ">":
                 self.advance()
                 self.advance()
                 self.tokens.append(
-                    Token(
-                        TokenType.RECURSE_DOWN_REL,
-                        ">>",
-                        start_line,
-                        start_column))
+                    Token(TokenType.RECURSE_DOWN_REL, ">>", start_line, start_column)
+                )
 
             elif char == "!" and self.peek(1) == "=":
                 self.advance()
@@ -434,12 +417,7 @@ class OverpassQLLexer:
 
             elif char == ".":
                 self.advance()
-                self.tokens.append(
-                    Token(
-                        TokenType.DOT,
-                        ".",
-                        start_line,
-                        start_column))
+                self.tokens.append(Token(TokenType.DOT, ".", start_line, start_column))
 
             elif char == ":":
                 self.advance()
@@ -492,11 +470,8 @@ class OverpassQLLexer:
             elif char == ">":
                 self.advance()
                 self.tokens.append(
-                    Token(
-                        TokenType.RECURSE_DOWN,
-                        ">",
-                        start_line,
-                        start_column))
+                    Token(TokenType.RECURSE_DOWN, ">", start_line, start_column)
+                )
 
             elif char == "-":
                 self.advance()
@@ -569,10 +544,9 @@ class OverpassQLParser:
     def error(self, message: str, token: Optional[Token] = None):
         """Add an error message."""
         if token:
-            error_msg = (
-                f"Syntax Error at line {
+            error_msg = f"Syntax Error at line {
                     token.line}, column {
-                    token.column}: {message}")
+                    token.column}: {message}"
         else:
             current = self.current_token()
             error_msg = f"Syntax Error at line {
@@ -583,16 +557,14 @@ class OverpassQLParser:
     def warning(self, message: str, token: Optional[Token] = None):
         """Add a warning message."""
         if token:
-            warning_msg = (
-                f"Warning at line {
+            warning_msg = f"Warning at line {
                     token.line}, column {
-                    token.column}: {message}")
+                    token.column}: {message}"
         else:
             current = self.current_token()
-            warning_msg = (
-                f"Warning at line {
+            warning_msg = f"Warning at line {
                     current.line}, column {
-                    current.column}: {message}")
+                    current.column}: {message}"
         self.warnings.append(warning_msg)
 
     def current_token(self) -> Token:
@@ -622,7 +594,8 @@ class OverpassQLParser:
             self.error(
                 f"Expected {
                     expected_type.value}, got {
-                    token.type.value}")
+                    token.type.value}"
+            )
         else:
             self.advance()
         return token
@@ -659,7 +632,8 @@ class OverpassQLParser:
                     if not self.match(TokenType.NUMBER):
                         self.error(
                             f"Expected number after {
-                                setting_token.value}:")
+                                setting_token.value}:"
+                        )
                     else:
                         number = self.advance()
                         try:
@@ -672,7 +646,8 @@ class OverpassQLParser:
                             self.error(
                                 f"Invalid number for {
                                     setting_token.value}: {
-                                    number.value}")
+                                    number.value}"
+                            )
 
                 elif setting_name == "bbox":
                     self.expect(TokenType.COLON)
@@ -692,16 +667,19 @@ class OverpassQLParser:
                                     if not -90 <= coord_val <= 90:
                                         self.error(
                                             f"Latitude must be between -90 and "
-                                            f"90: {coord_val}")
+                                            f"90: {coord_val}"
+                                        )
                                 else:  # longitude values
                                     if not -180 <= coord_val <= 180:
                                         self.error(
                                             f"Longitude must be between -180 and "
-                                            f"180: {coord_val}")
+                                            f"180: {coord_val}"
+                                        )
                             except ValueError:
                                 self.error(
                                     f"Invalid coordinate: {
-                                        coord.value}")
+                                        coord.value}"
+                                )
 
                 elif setting_name in ["date", "diff", "adiff"]:
                     self.expect(TokenType.COLON)
@@ -709,13 +687,14 @@ class OverpassQLParser:
                     if not self.match(TokenType.STRING):
                         self.error(
                             f"Expected date string after {
-                                setting_token.value}:")
+                                setting_token.value}:"
+                        )
                     else:
                         date_str = self.advance()
                         # Basic ISO 8601 date format validation
                         if not re.match(
-                            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
-                                date_str.value):
+                            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_str.value
+                        ):
                             self.error(
                                 "Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ"
                             )
@@ -728,9 +707,8 @@ class OverpassQLParser:
                         self.advance()
                         # Skip the value
                         if self.match(
-                                TokenType.STRING,
-                                TokenType.NUMBER,
-                                TokenType.IDENTIFIER):
+                            TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER
+                        ):
                             self.advance()
 
             elif self.match(TokenType.OUT):
@@ -743,7 +721,8 @@ class OverpassQLParser:
                     if format_token.value.lower() not in self.OUTPUT_FORMATS:
                         self.error(
                             f"Invalid output format: {
-                                format_token.value}")
+                                format_token.value}"
+                        )
                 elif self.match(TokenType.STRING):
                     # Could be csv with parameters
                     self.advance()
@@ -772,17 +751,11 @@ class OverpassQLParser:
             self.advance()  # Skip key
 
             # Check for operator
-            if self.match(
-                    TokenType.EQUALS,
-                    TokenType.NOT_EQUALS,
-                    TokenType.REGEX_OP):
+            if self.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.REGEX_OP):
                 op_token = self.advance()
 
                 # Parse value
-                if self.match(
-                        TokenType.STRING,
-                        TokenType.IDENTIFIER,
-                        TokenType.NUMBER):
+                if self.match(TokenType.STRING, TokenType.IDENTIFIER, TokenType.NUMBER):
                     value_token = self.advance()
 
                     # For regex operator, validate regex
@@ -875,7 +848,8 @@ class OverpassQLParser:
                         if not self.match(TokenType.NUMBER):
                             self.error(
                                 f"Expected {
-                                    'latitude' if coord_idx == 0 else 'longitude'}")
+                                    'latitude' if coord_idx == 0 else 'longitude'}"
+                            )
                         else:
                             coord = self.advance()
                             try:
@@ -884,16 +858,19 @@ class OverpassQLParser:
                                     if not -90 <= coord_val <= 90:
                                         self.error(
                                             f"Latitude must be between -90 and "
-                                            f"90: {coord_val}")
+                                            f"90: {coord_val}"
+                                        )
                                 else:  # longitude
                                     if not -180 <= coord_val <= 180:
                                         self.error(
                                             f"Longitude must be between -180 and "
-                                            f"180: {coord_val}")
+                                            f"180: {coord_val}"
+                                        )
                             except ValueError:
                                 self.error(
                                     f"Invalid coordinate: {
-                                        coord.value}")
+                                        coord.value}"
+                                )
 
                     # Check for additional coordinate pairs (linestring)
                     while self.match(TokenType.COMMA):
@@ -906,15 +883,13 @@ class OverpassQLParser:
             elif filter_type.value.lower() == "poly":
                 self.expect(TokenType.COLON)
                 if not self.match(TokenType.STRING):
-                    self.error(
-                        "Expected polygon coordinate string after 'poly:'")
+                    self.error("Expected polygon coordinate string after 'poly:'")
                 else:
                     poly_str = self.advance()
                     # Basic validation of polygon string format
                     coords = poly_str.value.split()
                     if len(coords) < 6 or len(coords) % 2 != 0:
-                        self.error(
-                            "Polygon must have at least 3 coordinate pairs")
+                        self.error("Polygon must have at least 3 coordinate pairs")
 
             elif filter_type.value.lower() == "area":
                 # area or area.setname or area:id
@@ -950,9 +925,8 @@ class OverpassQLParser:
                 elif self.match(TokenType.COLON):
                     self.advance()
                     if self.match(
-                            TokenType.STRING,
-                            TokenType.NUMBER,
-                            TokenType.IDENTIFIER):
+                        TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER
+                    ):
                         self.advance()
 
         # Could also be bbox coordinates or ID list
@@ -1016,9 +990,8 @@ class OverpassQLParser:
                 else:
                     # Other filters like newer:"date", user:"name", uid:123
                     if self.match(
-                            TokenType.STRING,
-                            TokenType.NUMBER,
-                            TokenType.IDENTIFIER):
+                        TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER
+                    ):
                         self.advance()
 
         self.expect(TokenType.RPAREN)
@@ -1057,9 +1030,7 @@ class OverpassQLParser:
                 else:
                     set_name = self.advance()
                     # Validate set name
-                    if not re.match(
-                        r"^[a-zA-Z_][a-zA-Z0-9_]*$",
-                            set_name.value):
+                    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", set_name.value):
                         self.error(f"Invalid set name: {set_name.value}")
 
         self.expect(TokenType.SEMICOLON)
@@ -1439,7 +1410,8 @@ class OverpassQLSyntaxChecker:
         if verbose:
             print(
                 f"Query validation result: {
-                    'VALID' if result['valid'] else 'INVALID'}")
+                    'VALID' if result['valid'] else 'INVALID'}"
+            )
             print(f"Errors: {len(result['errors'])}")
             print(f"Warnings: {len(result['warnings'])}")
 
@@ -1458,7 +1430,6 @@ class OverpassQLSyntaxChecker:
                 for token in result["tokens"][:20]:  # Limit output
                     print(f"  {token}")
                 if len(result["tokens"]) > 20:
-                    print(
-                        f"  ... and {len(result['tokens']) - 20} more tokens")
+                    print(f"  ... and {len(result['tokens']) - 20} more tokens")
 
         return result["valid"]

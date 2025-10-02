@@ -165,8 +165,7 @@ def test_complex_queries():
                 print(f"Tokens (first 10): {', '.join(tokens[:10])}")
 
     print(f"\n{'=' * 60}")
-    print(
-        f"Complex Query Tests: {passed}/{total} passed ({passed / total * 100:.1f}%)")
+    print(f"Complex Query Tests: {passed}/{total} passed ({passed / total * 100:.1f}%)")
 
     return passed == total
 

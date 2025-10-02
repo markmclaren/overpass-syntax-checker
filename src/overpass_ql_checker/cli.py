@@ -30,18 +30,15 @@ def run_tests(checker: "OverpassQLSyntaxChecker"):
             "Area query with assignment",
         ),
         ("rel[type=route][route=bus];out;", True, "Relation query"),
-        ("node(around:1000,52.5,13.4)[amenity=restaurant];out;",
-         True, "Around filter"),
+        ("node(around:1000,52.5,13.4)[amenity=restaurant];out;", True, "Around filter"),
         ('nwr[name~"^Berlin"];out;', True, "Regex filter"),
         ('node["addr:city"="Berlin"];out;', True, "Quoted key with colon"),
         # Invalid queries
         ("node[amenity=restaurant]", False, "Missing semicolon"),
         ("[invalid:setting];", False, "Invalid setting"),
         ("node[;out;", False, "Malformed tag filter"),
-        ("way[highway=primary](invalid);out;",
-         False, "Invalid spatial filter"),
-        ("node[amenity restaurant];out;",
-         False, "Missing equals in tag filter"),
+        ("way[highway=primary](invalid);out;", False, "Invalid spatial filter"),
+        ("node[amenity restaurant];out;", False, "Missing equals in tag filter"),
         ("[bbox:invalid,coords];", False, "Invalid bbox coordinates"),
         ('node[name~"[invalid"];out;', False, "Invalid regex pattern"),
         ("out invalid_mode;", False, "Invalid out mode"),
@@ -65,10 +62,12 @@ def run_tests(checker: "OverpassQLSyntaxChecker"):
         if actual_valid != expected_valid:
             print(
                 f"         Expected: {
-                    'VALID' if expected_valid else 'INVALID'}")
+                    'VALID' if expected_valid else 'INVALID'}"
+            )
             print(
                 f"         Actual:   {
-                    'VALID' if actual_valid else 'INVALID'}")
+                    'VALID' if actual_valid else 'INVALID'}"
+            )
             if result["errors"]:
                 print(f"         Errors: {result['errors']}")
 
@@ -98,14 +97,8 @@ def main():
         action="store_true",
         help="Print detailed information including tokens",
     )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Run built-in tests")
-    parser.add_argument(
-        "--version",
-        action="version",
-        version="%(prog)s 1.0.0")
+    parser.add_argument("--test", action="store_true", help="Run built-in tests")
+    parser.add_argument("--version", action="version", version="%(prog)s 1.0.0")
 
     args = parser.parse_args()
 
