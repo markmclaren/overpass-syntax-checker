@@ -1,8 +1,7 @@
 # Overpass QL Syntax Checker
 
-[![PyPI version](https://badge.fury.io/py/overpass-ql-checker.svg)](https://badge.fury.io/py/overpass-ql-checker)
-[![Python Support](https://img.shields.io/pypi/pyversions/overpass-ql-checker.svg)](https://pypi.org/project/overpass-ql-checker/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python Support](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 
 A comprehensive Python syntax checker for the Overpass Query Language (OverpassQL), used to query OpenStreetMap data through the Overpass API.
 
@@ -33,9 +32,36 @@ A comprehensive Python syntax checker for the Overpass Query Language (OverpassQ
 
 ## Installation
 
+### Local Development Installation
+
+Since this package is not yet published to PyPI, you can install it locally:
+
 ```bash
-pip install overpass-ql-checker
+# Clone the repository
+git clone https://github.com/markmclaren/overpass-syntax-checker.git
+cd overpass-syntax-checker
+
+# Install in development mode
+pip install -e .
+
+# Or install with development dependencies
+pip install -e ".[dev]"
 ```
+
+### Manual Installation
+
+You can also install directly from the repository:
+
+```bash
+pip install git+https://github.com/markmclaren/overpass-syntax-checker.git
+```
+
+### Requirements
+
+- Python 3.7 or higher
+- No external dependencies (uses only Python standard library)
+
+> **Note**: This package will be published to PyPI in the future. Once published, you'll be able to install it with `pip install overpass-ql-checker`.
 
 ## Usage
 
@@ -248,6 +274,39 @@ The test suite includes:
 ## Development
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/markmclaren/overpass-syntax-checker.git
+cd overpass-syntax-checker
+
+# Create a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install in development mode with dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+python -m pytest tests/
+# or
+overpass-ql-check --test
+```
+
+### Building for Distribution
+
+```bash
+# Build the package
+python -m build
+
+# Check the distribution
+twine check dist/*
+
+# (Future) Upload to PyPI
+# twine upload dist/*
+```
 
 ## License
 
