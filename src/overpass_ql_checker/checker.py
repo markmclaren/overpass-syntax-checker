@@ -569,7 +569,10 @@ class OverpassQLParser:
             )
         else:
             current = self.current_token()
-            error_msg = f"Syntax Error at line {current.line}, column {current.column}: {message}"
+            error_msg = (
+                f"Syntax Error at line {current.line}, column {current.column}: "
+                f"{message}"
+            )
         self.errors.append(error_msg)
 
     def warning(self, message: str, token: Optional[Token] = None):
@@ -609,11 +612,7 @@ class OverpassQLParser:
         """Expect a specific token type."""
         token = self.current_token()
         if token.type != expected_type:
-            self.error(
-                f"Expected {
-                    expected_type.value}, got {
-                    token.type.value}"
-            )
+            self.error(f"Expected {expected_type.value}, got {token.type.value}")
         else:
             self.advance()
         return token
