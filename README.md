@@ -329,6 +329,15 @@ pip install -e ".[dev]"
 python -m pytest tests/
 # or
 overpass-ql-check --test
+
+# Run code quality checks (same as CI)
+black --check src/ tests/ examples/
+isort --check-only src/ tests/ examples/
+flake8 src/ tests/ examples/
+
+# Auto-fix formatting issues
+black src/ tests/ examples/
+isort src/ tests/ examples/
 ```
 
 ### Building for Distribution

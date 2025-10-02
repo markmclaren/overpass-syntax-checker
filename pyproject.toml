@@ -37,6 +37,7 @@ dev = [
     "pytest-cov",
     "black",
     "flake8",
+    "isort",
     "mypy",
 ]
 
@@ -64,6 +65,10 @@ python_functions = ["test_*"]
 [tool.black]
 line-length = 88
 target-version = ['py37']
+
+[tool.isort]
+profile = "black"
+line_length = 88
 
 [tool.mypy]
 python_version = "3.7"
