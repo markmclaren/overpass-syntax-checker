@@ -576,27 +576,25 @@ class OverpassQLParser:
     def error(self, message: str, token: Optional[Token] = None):
         """Add an error message."""
         if token:
-            error_msg = f"Syntax Error at line {
-                token.line}, column {
-                token.column}: {message}"
+            error_msg = (
+                f"Syntax Error at line {token.line}, column {token.column}: {message}"
+            )
         else:
             current = self.current_token()
-            error_msg = f"Syntax Error at line {
-                current.line}, column {
-                current.column}: {message}"
+            error_msg = f"Syntax Error at line {current.line}, column {current.column}: {message}"
         self.errors.append(error_msg)
 
     def warning(self, message: str, token: Optional[Token] = None):
         """Add a warning message."""
         if token:
-            warning_msg = f"Warning at line {
-                token.line}, column {
-                token.column}: {message}"
+            warning_msg = (
+                f"Warning at line {token.line}, column {token.column}: {message}"
+            )
         else:
             current = self.current_token()
-            warning_msg = f"Warning at line {
-                current.line}, column {
-                current.column}: {message}"
+            warning_msg = (
+                f"Warning at line {current.line}, column {current.column}: {message}"
+            )
         self.warnings.append(warning_msg)
 
     def current_token(self) -> Token:

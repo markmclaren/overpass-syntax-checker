@@ -60,14 +60,8 @@ def run_tests(checker: "OverpassQLSyntaxChecker"):
         print(f"Test {i:2d}: {status} - {description}")
 
         if actual_valid != expected_valid:
-            print(
-                f"         Expected: {
-                    'VALID' if expected_valid else 'INVALID'}"
-            )
-            print(
-                f"         Actual:   {
-                    'VALID' if actual_valid else 'INVALID'}"
-            )
+            print(f"         Expected: {'VALID' if expected_valid else 'INVALID'}")
+            print(f"         Actual:   {'VALID' if actual_valid else 'INVALID'}")
             if result["errors"]:
                 print(f"         Errors: {result['errors']}")
 

@@ -87,10 +87,7 @@ class TestOverpassQLSyntaxChecker:
 
         for query in complex_queries:
             result = self.checker.check_syntax(query)
-            assert result[
-                "valid"
-            ], f"Complex query should be valid: {
-                query.strip()}"
+            assert result["valid"], f"Complex query should be valid: {query.strip()}"
 
     def test_settings_validation(self):
         """Test settings validation."""
