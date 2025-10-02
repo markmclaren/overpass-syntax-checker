@@ -344,15 +344,14 @@ class OverpassQLLexer:
 
         return value
 
-    def _handle_two_char_operators(self, char: str, start_line: int,
-                                   start_column: int) -> bool:
+    def _handle_two_char_operators(
+        self, char: str, start_line: int, start_column: int
+    ) -> bool:
         """Handle two-character operators. Returns True if handled, False otherwise."""
         if char == "-" and self.peek(1) == ">":
             self.advance()
             self.advance()
-            self.tokens.append(
-                Token(TokenType.ASSIGN, "->", start_line, start_column)
-            )
+            self.tokens.append(Token(TokenType.ASSIGN, "->", start_line, start_column))
             return True
         elif char == "<" and self.peek(1) == "<":
             self.advance()
@@ -377,8 +376,9 @@ class OverpassQLLexer:
             return True
         return False
 
-    def _handle_single_char_tokens(self, char: str, start_line: int,
-                                   start_column: int) -> bool:
+    def _handle_single_char_tokens(
+        self, char: str, start_line: int, start_column: int
+    ) -> bool:
         """Handle single-character tokens. Returns True if handled, False otherwise."""
         token_map = {
             ";": TokenType.SEMICOLON,
@@ -400,14 +400,13 @@ class OverpassQLLexer:
 
         if char in token_map:
             self.advance()
-            self.tokens.append(
-                Token(token_map[char], char, start_line, start_column)
-            )
+            self.tokens.append(Token(token_map[char], char, start_line, start_column))
             return True
         return False
 
-    def _handle_brace_tokens(self, char: str, start_line: int,
-                             start_column: int) -> bool:
+    def _handle_brace_tokens(
+        self, char: str, start_line: int, start_column: int
+    ) -> bool:
         """Handle brace tokens including template placeholders."""
         if char == "{":
             # Check for template placeholder {{variable}}
@@ -429,8 +428,9 @@ class OverpassQLLexer:
             return True
         return False
 
-    def _handle_basic_tokens(self, char: str, start_line: int,
-                             start_column: int) -> bool:
+    def _handle_basic_tokens(
+        self, char: str, start_line: int, start_column: int
+    ) -> bool:
         """Handle basic character types. Returns True if handled."""
         # Skip whitespace
         if char in " \t\r":
@@ -463,13 +463,12 @@ class OverpassQLLexer:
 
         return False
 
-    def _handle_numbers_and_identifiers(self, char: str, start_line: int,
-                                        start_column: int) -> bool:
+    def _handle_numbers_and_identifiers(
+        self, char: str, start_line: int, start_column: int
+    ) -> bool:
         """Handle numbers and identifiers. Returns True if handled."""
         # Numbers
-        if char.isdigit() or (
-            char == "-" and self.peek(1) and self.peek(1).isdigit()
-        ):
+        if char.isdigit() or (char == "-" and self.peek(1) and self.peek(1).isdigit()):
             number_value = self.read_number()
             self.tokens.append(
                 Token(TokenType.NUMBER, number_value, start_line, start_column)
@@ -479,12 +478,8 @@ class OverpassQLLexer:
         # Identifiers and keywords
         elif char.isalpha() or char == "_":
             identifier = self.read_identifier()
-            token_type = self.KEYWORDS.get(
-                identifier.lower(), TokenType.IDENTIFIER
-            )
-            self.tokens.append(
-                Token(token_type, identifier, start_line, start_column)
-            )
+            token_type = self.KEYWORDS.get(identifier.lower(), TokenType.IDENTIFIER)
+            self.tokens.append(Token(token_type, identifier, start_line, start_column))
             return True
 
         return False
@@ -574,9 +569,7 @@ class OverpassQLParser:
             )
         else:
             current = self.current_token()
-            error_msg = f"Syntax Error at line {
-                current.line}, column {
-                current.column}: {message}"
+            error_msg = f"Syntax Error at line {current.line}, column {current.column}: {message}"
         self.errors.append(error_msg)
 
     def warning(self, message: str, token: Optional[Token] = None):
@@ -640,13 +633,10 @@ class OverpassQLParser:
             try:
                 value = int(number.value)
                 if value < 0:
-                    self.error(
-                        f"{setting_token.value} must be non-negative"
-                    )
+                    self.error(f"{setting_token.value} must be non-negative")
             except ValueError:
                 self.error(
-                    f"Invalid number for {setting_token.value}: "
-                    f"{number.value}"
+                    f"Invalid number for {setting_token.value}: " f"{number.value}"
                 )
 
     def _parse_bbox_setting(self) -> None:
@@ -667,8 +657,7 @@ class OverpassQLParser:
                     if i in [0, 2]:  # latitude values
                         if not -90 <= coord_val <= 90:
                             self.error(
-                                f"Latitude must be between -90 and 90: "
-                                f"{coord_val}"
+                                f"Latitude must be between -90 and 90: " f"{coord_val}"
                             )
                     else:  # longitude values
                         if not -180 <= coord_val <= 180:
@@ -688,12 +677,8 @@ class OverpassQLParser:
         else:
             date_str = self.advance()
             # Basic ISO 8601 date format validation
-            if not re.match(
-                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_str.value
-            ):
-                self.error(
-                    "Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ"
-                )
+            if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_str.value):
+                self.error("Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ")
 
     def _parse_unknown_setting(self, setting_token: Token) -> None:
         """Parse unknown settings with warning."""
@@ -794,8 +779,9 @@ class OverpassQLParser:
                 if flag.value.lower() != "i":
                     self.error(f"Invalid regex flag: {flag.value}")
 
-    def _validate_and_parse_regex_value(self, op_token: Token,
-                                        value_token: Token) -> None:
+    def _validate_and_parse_regex_value(
+        self, op_token: Token, value_token: Token
+    ) -> None:
         """Validate regex pattern and parse optional flag."""
         if op_token.type == TokenType.REGEX_OP:
             try:
@@ -874,14 +860,10 @@ class OverpassQLParser:
             coord_val = float(coord.value)
             if coord_idx == 0:  # latitude
                 if not -90 <= coord_val <= 90:
-                    self.error(
-                        f"Latitude must be between -90 and 90: {coord_val}"
-                    )
+                    self.error(f"Latitude must be between -90 and 90: {coord_val}")
             else:  # longitude
                 if not -180 <= coord_val <= 180:
-                    self.error(
-                        f"Longitude must be between -180 and 180: {coord_val}"
-                    )
+                    self.error(f"Longitude must be between -180 and 180: {coord_val}")
         except ValueError:
             self.error(f"Invalid coordinate: {coord.value}")
 
@@ -893,7 +875,7 @@ class OverpassQLParser:
                 self.expect(TokenType.COMMA)
 
             if not self.match(TokenType.NUMBER):
-                coord_type = 'latitude' if coord_idx == 0 else 'longitude'
+                coord_type = "latitude" if coord_idx == 0 else "longitude"
                 self.error(f"Expected {coord_type}")
             else:
                 coord = self.advance()
@@ -972,9 +954,20 @@ class OverpassQLParser:
         """Parse other named spatial filters."""
         # Define valid spatial filter identifiers
         valid_spatial_filters = {
-            "w", "r", "bn", "bw", "br",  # member filters
-            "bbox", "id", "newer", "user", "uid", "changed",  # other valid filters
-            "nds", "ndr", "pivot",  # relation member filters
+            "w",
+            "r",
+            "bn",
+            "bw",
+            "br",  # member filters
+            "bbox",
+            "id",
+            "newer",
+            "user",
+            "uid",
+            "changed",  # other valid filters
+            "nds",
+            "ndr",
+            "pivot",  # relation member filters
         }
 
         if filter_name not in valid_spatial_filters:
