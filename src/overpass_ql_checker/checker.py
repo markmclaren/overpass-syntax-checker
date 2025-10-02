@@ -86,6 +86,21 @@ class TokenType(Enum):
     NOT_EQUALS = "!="
     NOT_REGEX_OP = "!~"
 
+    # Logical operators
+    LOGICAL_AND = "&&"
+    LOGICAL_OR = "||"
+    GREATER_THAN = ">"
+    LESS_THAN = "<"
+    GREATER_EQUAL = ">="
+    LESS_EQUAL = "<="
+    EQUAL_EQUAL = "=="
+
+    # Arithmetic operators
+    PLUS = "+"
+    MINUS = "-"
+    MULTIPLY = "*"
+    DIVIDE = "/"
+
     # Settings
     SETTING_TIMEOUT = "timeout"
     SETTING_MAXSIZE = "maxsize"
@@ -387,39 +402,29 @@ class OverpassQLLexer:
         self, char: str, start_line: int, start_column: int
     ) -> bool:
         """Handle two-character operators. Returns True if handled, False otherwise."""
-        if char == "-" and self.peek(1) == ">":
+        # Map of (first_char, second_char) -> TokenType
+        two_char_operators = {
+            ("-", ">"): TokenType.ASSIGN,
+            ("<", "="): TokenType.LESS_EQUAL,
+            ("<", "<"): TokenType.RECURSE_UP_REL,
+            (">", "="): TokenType.GREATER_EQUAL,
+            (">", ">"): TokenType.RECURSE_DOWN_REL,
+            ("!", "="): TokenType.NOT_EQUALS,
+            ("!", "~"): TokenType.NOT_REGEX_OP,
+            ("&", "&"): TokenType.LOGICAL_AND,
+            ("|", "|"): TokenType.LOGICAL_OR,
+            ("=", "="): TokenType.EQUAL_EQUAL,
+        }
+
+        next_char = self.peek(1)
+        if next_char and (char, next_char) in two_char_operators:
+            token_type = two_char_operators[(char, next_char)]
+            operator = char + next_char
             self.advance()
             self.advance()
-            self.tokens.append(Token(TokenType.ASSIGN, "->", start_line, start_column))
+            self.tokens.append(Token(token_type, operator, start_line, start_column))
             return True
-        elif char == "<" and self.peek(1) == "<":
-            self.advance()
-            self.advance()
-            self.tokens.append(
-                Token(TokenType.RECURSE_UP_REL, "<<", start_line, start_column)
-            )
-            return True
-        elif char == ">" and self.peek(1) == ">":
-            self.advance()
-            self.advance()
-            self.tokens.append(
-                Token(TokenType.RECURSE_DOWN_REL, ">>", start_line, start_column)
-            )
-            return True
-        elif char == "!" and self.peek(1) == "=":
-            self.advance()
-            self.advance()
-            self.tokens.append(
-                Token(TokenType.NOT_EQUALS, "!=", start_line, start_column)
-            )
-            return True
-        elif char == "!" and self.peek(1) == "~":
-            self.advance()
-            self.advance()
-            self.tokens.append(
-                Token(TokenType.NOT_REGEX_OP, "!~", start_line, start_column)
-            )
-            return True
+
         return False
 
     def _handle_single_char_tokens(
@@ -438,10 +443,13 @@ class OverpassQLLexer:
             "}": TokenType.RBRACE,
             "<": TokenType.RECURSE_UP,
             ">": TokenType.RECURSE_DOWN,
-            "-": TokenType.UNION_MINUS,
+            "-": TokenType.MINUS,  # Changed from UNION_MINUS
             "~": TokenType.REGEX_OP,
             "!": TokenType.NOT_OP,
             "=": TokenType.EQUALS,
+            "+": TokenType.PLUS,
+            "*": TokenType.MULTIPLY,
+            "/": TokenType.DIVIDE,
         }
 
         if char in token_map:
@@ -638,7 +646,7 @@ class OverpassQLParser:
     """Parser for Overpass QL syntax checking."""
 
     # Valid output formats
-    OUTPUT_FORMATS = {"xml", "json", "csv", "custom", "popup"}
+    OUTPUT_FORMATS = {"xml", "json", "csv", "custom", "popup", "opl"}
 
     # Valid out statement modes
     OUT_MODES = {"ids", "skel", "body", "tags", "meta"}
@@ -1352,6 +1360,17 @@ class OverpassQLParser:
             elif filter_name == "pivot":
                 # pivot.setname doesn't need additional parsing
                 pass
+            elif filter_name in {"w", "r", "bn", "bw", "br"}:
+                # Member filters with set reference and optional role
+                # Parse optional :role part
+                if self.match(TokenType.COLON):
+                    self.advance()  # Skip :
+                    if self.match(TokenType.STRING):
+                        self.advance()  # Skip role string
+                    else:
+                        self.error(
+                            f"Expected role string after ':' in {filter_name} filter"
+                        )
             else:
                 # Other filters with set references
                 pass
@@ -1402,7 +1421,12 @@ class OverpassQLParser:
         if not self.match(*self.QUERY_TYPES):
             return False
 
+        query_type = self.current_token()
         self.advance()  # Skip query type
+
+        # Special handling for area statements with parameter lists
+        if query_type.type == TokenType.AREA and self.match(TokenType.LPAREN):
+            return self._parse_area_lookup_statement()
 
         # Handle input set prefix (e.g., node.setname)
         if self.match(TokenType.DOT):
@@ -1429,6 +1453,42 @@ class OverpassQLParser:
                 if not self._parse_set_name():
                     self.error("Expected set name after '.'")
                 # No need to validate set name here, _parse_set_name handles it
+
+        self.expect(TokenType.SEMICOLON)
+        return True
+
+    def _parse_area_lookup_statement(self) -> bool:
+        """Parse area lookup statement like area(id:123,456,789);"""
+        self.expect(TokenType.LPAREN)
+
+        # Parse area parameters (id:123,456 or name or other filters)
+        if self.match(TokenType.IDENTIFIER):
+            param_name = self.advance()
+
+            if param_name.value.lower() == "id" and self.match(TokenType.COLON):
+                self.advance()  # Skip :
+                self._parse_id_list_filter()
+            elif self.match(TokenType.COLON):
+                # Other parameter types like name:, etc.
+                self.advance()  # Skip :
+                if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+                    self.advance()
+            else:
+                self.error(f"Expected ':' after area parameter '{param_name.value}'")
+        else:
+            self.error("Expected area parameter (like 'id')")
+
+        self.expect(TokenType.RPAREN)
+
+        # Handle output assignment (->setname)
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if not self.match(TokenType.DOT):
+                self.error("Expected '.' after '->' in assignment")
+            else:
+                self.advance()
+                if not self._parse_set_name():
+                    self.error("Expected set name after '.'")
 
         self.expect(TokenType.SEMICOLON)
         return True
@@ -1527,13 +1587,13 @@ class OverpassQLParser:
 
         # Parse statements inside union
         while not self.match(TokenType.RPAREN, TokenType.EOF):
-            if self.match(TokenType.UNION_MINUS):
-                # Difference operation
+            if self.match(TokenType.MINUS):
+                # Difference operation (-.setname or -statement)
                 self.advance()
                 continue
 
-            # Parse individual statement
-            if not self.parse_statement():
+            # Parse individual statement (could be a set reference, query, etc.)
+            if not self._parse_union_member():
                 break
 
         self.expect(TokenType.RPAREN)
@@ -1550,6 +1610,48 @@ class OverpassQLParser:
 
         self.expect(TokenType.SEMICOLON)
         return True
+
+    def _parse_union_member(self) -> bool:
+        """Parse a member of a union statement."""
+        # Handle set references like ._ or .setname
+        if self.match(TokenType.DOT):
+            self.advance()
+            if self.match(TokenType.IDENTIFIER):
+                self.advance()
+            else:
+                self.error("Expected set name after '.'")
+                return False
+
+            # Handle assignment after set reference (e.g., ._ -> .result)
+            if self.match(TokenType.ASSIGN):
+                self.advance()
+                if not self.match(TokenType.DOT):
+                    self.error("Expected '.' after '->' in assignment")
+                    return False
+                self.advance()
+                if not self.match(TokenType.IDENTIFIER):
+                    self.error("Expected set name after '.'")
+                    return False
+                self.advance()
+
+            # Expect semicolon after set reference
+            if self.match(TokenType.SEMICOLON):
+                self.advance()
+            return True
+        # Handle recursion operators like >, >>, <, <<
+        elif self.match(
+            TokenType.RECURSE_DOWN,
+            TokenType.RECURSE_DOWN_REL,
+            TokenType.RECURSE_UP,
+            TokenType.RECURSE_UP_REL,
+        ):
+            self.advance()
+            if self.match(TokenType.SEMICOLON):
+                self.advance()
+            return True
+        # Handle regular statements
+        else:
+            return self.parse_statement()
 
     def _parse_block_set_specifications(self) -> None:
         """Parse input/output set specifications for block statements."""
@@ -1853,6 +1955,26 @@ class OverpassQLParser:
 
     def _parse_make_value_expression(self) -> None:
         """Parse value expression in make statement."""
+        self._parse_make_additive_expression()
+
+    def _parse_make_additive_expression(self) -> None:
+        """Parse additive expressions (+ and -)."""
+        self._parse_make_multiplicative_expression()
+
+        while self.match(TokenType.PLUS, TokenType.MINUS):
+            self.advance()  # Skip operator
+            self._parse_make_multiplicative_expression()
+
+    def _parse_make_multiplicative_expression(self) -> None:
+        """Parse multiplicative expressions (* and /)."""
+        self._parse_make_primary_expression()
+
+        while self.match(TokenType.MULTIPLY, TokenType.DIVIDE):
+            self.advance()  # Skip operator
+            self._parse_make_primary_expression()
+
+    def _parse_make_primary_expression(self) -> None:
+        """Parse primary expressions (function calls, identifiers, numbers, strings)."""
         # Handle function calls like count(ways), length(sum(length()))
         if (
             self.match(TokenType.IDENTIFIER)
@@ -1880,27 +2002,19 @@ class OverpassQLParser:
         # Handle simple values
         elif self.match(TokenType.NUMBER, TokenType.STRING):
             self.advance()
+        # Handle parenthesized expressions
+        elif self.match(TokenType.LPAREN):
+            self.advance()  # Skip (
+            self._parse_make_value_expression()
+            self.expect(TokenType.RPAREN)
         else:
             self.error("Expected value expression in make statement")
 
     def _parse_make_function_args(self) -> None:
         """Parse function arguments in make statement."""
         while True:
-            # Parse argument (can be function call or simple value)
-            if (
-                self.match(TokenType.IDENTIFIER)
-                and self.peek_ahead(1)
-                and self.peek_ahead(1).type == TokenType.LPAREN
-            ):
-                self.advance()  # Function name
-                self.expect(TokenType.LPAREN)
-                if not self.match(TokenType.RPAREN):
-                    self._parse_make_function_args()
-                self.expect(TokenType.RPAREN)
-            elif self.match(TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.STRING):
-                self.advance()
-            else:
-                break
+            # Parse argument (can be function call, expression, or simple value)
+            self._parse_make_value_expression()
 
             if self.match(TokenType.COMMA):
                 self.advance()
@@ -1940,7 +2054,23 @@ class OverpassQLParser:
             return False
 
         # Try different statement types
-        if self.parse_query_statement():
+        # Handle set reference followed by out statement (.setname out;)
+        if (
+            self.match(TokenType.DOT)
+            and self.peek_token(1)
+            and self.peek_token(1).type == TokenType.IDENTIFIER
+            and self.peek_token(2)
+            and self.peek_token(2).type == TokenType.OUT
+        ):
+            # Parse as set reference followed by out statement
+            self.advance()  # Skip .
+            if not self.match(TokenType.IDENTIFIER):
+                self.error("Expected set name after '.'")
+            else:
+                self.advance()  # Skip set name
+            # Now parse the out statement
+            return self.parse_out_statement()
+        elif self.parse_query_statement():
             return True
         elif self.parse_out_statement():
             return True
