@@ -39,6 +39,7 @@ class TokenType(Enum):
     CONVERT = "CONVERT"
     MAKE = "MAKE"
     DERIVED = "DERIVED"
+    MAP_TO_AREA = "MAP_TO_AREA"
 
     # Block statement keywords
     IF = "IF"
@@ -149,6 +150,7 @@ class OverpassQLLexer:
         "convert": TokenType.CONVERT,
         "make": TokenType.MAKE,
         "derived": TokenType.DERIVED,
+        "map_to_area": TokenType.MAP_TO_AREA,
         "if": TokenType.IF,
         "else": TokenType.ELSE,
         "foreach": TokenType.FOREACH,
@@ -732,9 +734,10 @@ class OverpassQLParser:
         """Parse timeout or maxsize settings."""
         self.expect(TokenType.COLON)
 
-        if not self.match(TokenType.NUMBER):
-            self.error(f"Expected number after {setting_token.value}:")
-        else:
+        if self.match(TokenType.TEMPLATE_PLACEHOLDER):
+            # Allow template placeholders in settings
+            self.advance()
+        elif self.match(TokenType.NUMBER):
             number = self.advance()
             try:
                 value = int(number.value)
@@ -744,10 +747,19 @@ class OverpassQLParser:
                 self.error(
                     f"Invalid number for {setting_token.value}: " f"{number.value}"
                 )
+        else:
+            self.error(
+                f"Expected number or template placeholder after {setting_token.value}:"
+            )
 
     def _parse_bbox_setting(self) -> None:
         """Parse bbox setting with coordinate validation."""
         self.expect(TokenType.COLON)
+
+        # Check if it's a template placeholder first
+        if self.match(TokenType.TEMPLATE_PLACEHOLDER):
+            self.advance()
+            return
 
         # Parse bbox coordinates: south,west,north,east
         for i in range(4):
@@ -1059,6 +1071,22 @@ class OverpassQLParser:
             self.expect(TokenType.COMMA)
             self._parse_around_coordinates()
 
+    def _parse_around_set_filter(self, set_name: Token) -> None:
+        """Parse around filter with set reference like around.setname:distance."""
+        if self.match(TokenType.COLON):
+            self.advance()
+            # Parse distance
+            if not self.match(TokenType.NUMBER):
+                self.error("Expected distance after 'around.setname:'")
+            else:
+                distance = self.advance()
+                try:
+                    distance_val = float(distance.value)
+                    if distance_val < 0:
+                        self.error("Distance must be non-negative")
+                except ValueError:
+                    self.error(f"Invalid distance: {distance.value}")
+
     def _parse_poly_filter(self) -> None:
         """Parse polygon filter."""
         self.expect(TokenType.COLON)
@@ -1076,16 +1104,29 @@ class OverpassQLParser:
         # area or area.setname or area:id
         if self.match(TokenType.DOT):
             self.advance()  # Skip .
-            if not self.match(TokenType.IDENTIFIER):
+            if not self._parse_set_name():
                 self.error("Expected set name after 'area.'")
-            else:
-                self.advance()  # Skip set name
         elif self.match(TokenType.COLON):
             self.advance()  # Skip :
             if not self.match(TokenType.NUMBER):
                 self.error("Expected area ID after 'area:'")
             else:
                 self.advance()  # Skip area ID
+
+    def _parse_set_name(self) -> bool:
+        """Parse a set name, which can be an identifier or keyword."""
+        if self.match(
+            TokenType.IDENTIFIER,
+            TokenType.AREA,
+            TokenType.NODE,
+            TokenType.WAY,
+            TokenType.REL,
+            TokenType.RELATION,
+            TokenType.OUT,
+        ):
+            self.advance()
+            return True
+        return False
 
     def _parse_member_filters(self, filter_name: str) -> None:
         """Parse member filters (w, r, bn, bw, br)."""
@@ -1271,27 +1312,54 @@ class OverpassQLParser:
             return
 
         if self.match(TokenType.IDENTIFIER, TokenType.AREA):
-            filter_type = self.advance()
-            filter_name = filter_type.value.lower()
-
-            if filter_name == "around":
-                self._parse_around_filter()
-            elif filter_name == "poly":
-                self._parse_poly_filter()
-            elif filter_name == "area":
-                self._parse_area_filter()
-            else:
-                self._parse_other_named_filters(filter_name)
-
+            self._parse_identifier_spatial_filter()
         # Could also be bbox coordinates or ID list
         elif self.match(TokenType.NUMBER):
             self._parse_numeric_filters()
-
         # Handle special filter formats like id:123,456
         elif self.match(TokenType.IDENTIFIER):
             self._parse_identifier_filters()
 
         self.expect(TokenType.RPAREN)
+
+    def _parse_identifier_spatial_filter(self):
+        """Parse spatial filters that start with identifiers."""
+        filter_type = self.advance()
+        filter_name = filter_type.value.lower()
+
+        # Handle dotted filters like around.setname or pivot.setname
+        if self.match(TokenType.DOT):
+            self._parse_dotted_spatial_filter(filter_name)
+        else:
+            self._parse_simple_spatial_filter(filter_name)
+
+    def _parse_dotted_spatial_filter(self, filter_name: str):
+        """Parse dotted spatial filters like around.setname:distance."""
+        self.advance()  # Skip .
+        if not self.match(TokenType.IDENTIFIER):
+            self.error(f"Expected set name after '{filter_name}.'")
+        else:
+            set_name = self.advance()
+            # Now handle the specific filter type with set reference
+            if filter_name == "around":
+                self._parse_around_set_filter(set_name)
+            elif filter_name == "pivot":
+                # pivot.setname doesn't need additional parsing
+                pass
+            else:
+                # Other filters with set references
+                pass
+
+    def _parse_simple_spatial_filter(self, filter_name: str):
+        """Parse simple spatial filters without dots."""
+        if filter_name == "around":
+            self._parse_around_filter()
+        elif filter_name == "poly":
+            self._parse_poly_filter()
+        elif filter_name == "area":
+            self._parse_area_filter()
+        else:
+            self._parse_other_named_filters(filter_name)
 
     def parse_query_statement(self):
         """Parse query statement like node[amenity=shop](bbox)."""
@@ -1485,10 +1553,35 @@ class OverpassQLParser:
         }:
             if self.match(TokenType.LPAREN):
                 self.advance()
-                # Parse evaluator expression (simplified)
-                while not self.match(TokenType.RPAREN, TokenType.EOF):
-                    self.advance()
+
+                # For FOR loops, parse evaluator like t["key"]
+                if block_type.type == TokenType.FOR:
+                    self._parse_for_evaluator()
+                else:
+                    # Parse evaluator expression (simplified for other blocks)
+                    while not self.match(TokenType.RPAREN, TokenType.EOF):
+                        self.advance()
+
                 self.expect(TokenType.RPAREN)
+
+    def _parse_for_evaluator(self) -> None:
+        """Parse FOR loop evaluator like t["key"]."""
+        # Expect identifier like 't'
+        if not self.match(TokenType.IDENTIFIER):
+            self.error("Expected evaluator identifier in for loop")
+            return
+        self.advance()
+
+        # Parse tag filter part like ["key"]
+        if self.match(TokenType.LBRACKET):
+            self.advance()
+            if self.match(TokenType.STRING, TokenType.IDENTIFIER):
+                self.advance()
+            else:
+                self.error("Expected key name in for evaluator")
+            self.expect(TokenType.RBRACKET)
+        else:
+            self.error("Expected tag filter in for evaluator")
 
     def _parse_block_body(self) -> bool:
         """Parse block body and return whether braces were used."""
@@ -1645,40 +1738,51 @@ class OverpassQLParser:
         """Parse simple statements like recursion operators, is_in, etc."""
         # Handle template placeholders as standalone statements
         if self.match(TokenType.TEMPLATE_PLACEHOLDER):
-            self.advance()
-
-            # Check if template placeholder is followed by tag filters (like
-            # geocodeArea)
-            while self.match(TokenType.LBRACKET):
-                self.parse_tag_filter()
-
-            # Optional assignment operator
-            if self.match(TokenType.ASSIGN):
-                self.advance()
-                if self.match(TokenType.DOT):
-                    self.advance()
-                    if self.match(TokenType.IDENTIFIER):
-                        self.advance()
-            self.expect(TokenType.SEMICOLON)
-            return True
+            return self._parse_template_placeholder_statement()
 
         # Handle make statements
         if self.match(TokenType.MAKE):
             self._parse_make_statement()
             return True
 
+        # Handle map_to_area statements
+        if self.match(TokenType.MAP_TO_AREA):
+            self._parse_map_to_area_statement()
+            return True
+
         # Try different statement types
+        return self._try_other_simple_statements()
+
+    def _parse_template_placeholder_statement(self) -> bool:
+        """Parse template placeholder statements."""
+        self.advance()
+
+        # Check if template placeholder is followed by tag filters (like geocodeArea)
+        while self.match(TokenType.LBRACKET):
+            self.parse_tag_filter()
+
+        # Optional assignment operator
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if self.match(TokenType.IDENTIFIER):
+                    self.advance()
+        self.expect(TokenType.SEMICOLON)
+        return True
+
+    def _try_other_simple_statements(self) -> bool:
+        """Try parsing other types of simple statements."""
         if self._parse_recursion_statement():
             return True
         elif self._parse_is_in_statement():
             return True
         elif self._parse_set_reference():
             return True
-
         return False
 
     def _parse_make_statement(self) -> None:
-        """Parse make statement: make identifier ,key=value,...;"""
+        """Parse make statement: make identifier [,]key=value,...;"""
         self.advance()  # Skip 'make'
 
         # Parse identifier (can contain backslashes like stat_highway_\1)
@@ -1687,9 +1791,18 @@ class OverpassQLParser:
             return
         self.advance()
 
-        # Parse comma-separated key=value pairs
-        while self.match(TokenType.COMMA):
-            self.advance()  # Skip comma
+        # Parse optional comma after identifier
+        if self.match(TokenType.COMMA):
+            self.advance()
+
+        # Parse key=value pairs
+        first_pair = True
+        while (first_pair and self.match(TokenType.IDENTIFIER)) or (
+            not first_pair and self.match(TokenType.COMMA)
+        ):
+            if not first_pair:
+                self.advance()  # Skip comma
+            first_pair = False
 
             # Parse key
             if not self.match(TokenType.IDENTIFIER):
@@ -1724,8 +1837,18 @@ class OverpassQLParser:
                 self._parse_make_function_args()
 
             self.expect(TokenType.RPAREN)
+        # Handle complex expressions like _.val
+        elif self.match(TokenType.IDENTIFIER):
+            self.advance()
+            # Handle dotted access like _.val
+            if self.match(TokenType.DOT):
+                self.advance()
+                if self.match(TokenType.IDENTIFIER):
+                    self.advance()
+                else:
+                    self.error("Expected identifier after '.' in expression")
         # Handle simple values
-        elif self.match(TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.STRING):
+        elif self.match(TokenType.NUMBER, TokenType.STRING):
             self.advance()
         else:
             self.error("Expected value expression in make statement")
@@ -1760,6 +1883,22 @@ class OverpassQLParser:
         if pos < len(self.tokens):
             return self.tokens[pos]
         return None
+
+    def _parse_map_to_area_statement(self) -> None:
+        """Parse map_to_area statement."""
+        self.advance()  # Skip 'map_to_area' token
+
+        # Optional assignment to set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if self.match(TokenType.IDENTIFIER):
+                    self.advance()
+                else:
+                    self.error("Expected set name after '->'")
+
+        self.expect(TokenType.SEMICOLON)
 
     def parse_statement(self) -> bool:
         """Parse any statement."""
