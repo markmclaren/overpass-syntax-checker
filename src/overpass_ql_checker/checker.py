@@ -729,6 +729,13 @@ class OverpassQLParser:
             return None
         return self.tokens[pos]
 
+    def match_ahead(self, *token_types: TokenType, offset: int = 1) -> bool:
+        """Check if token at given offset matches any of the given types."""
+        token = self.peek_token(offset)
+        if token is None:
+            return False
+        return token.type in token_types
+
     def advance(self) -> Token:
         """Move to next token and return current."""
         token = self.current_token()
@@ -917,14 +924,34 @@ class OverpassQLParser:
 
     def _parse_csv_field(self) -> None:
         """Parse a single CSV field specification."""
-        # Handle special field types like ::id, ::type, etc.
+        # Handle special field types like ::id, ::type, ::count:nodes, etc.
         if self.match(TokenType.COLON):
             self.advance()  # Skip first :
             if self.match(TokenType.COLON):
                 self.advance()  # Skip second :
-            # Parse field name after ::
-            if self.match(TokenType.IDENTIFIER):
+            # Parse field name after :: - can be identifier, string, or identifier
+            # with colons
+            if self.match(TokenType.STRING):
+                # Handle quoted field names like ::"count:nodes"
                 self.advance()
+            elif self.match(TokenType.IDENTIFIER):
+                self.advance()
+                # Handle additional parts like :nodes, :ways, :relations after ::count
+                while self.match(TokenType.COLON):
+                    # Check if the next token after colon is a terminator
+                    next_token = self.peek_token()
+                    if next_token and next_token.type in {
+                        TokenType.COMMA,
+                        TokenType.SEMICOLON,
+                        TokenType.RPAREN,
+                    }:
+                        # Don't consume the colon if it's followed by a terminator
+                        break
+                    self.advance()  # Skip colon
+                    if self.match(TokenType.IDENTIFIER):
+                        self.advance()  # Parse identifier after colon
+                    else:
+                        break
         # Handle quoted field names or regular identifiers
         elif self.match(TokenType.STRING, TokenType.IDENTIFIER):
             self.advance()
