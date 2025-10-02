@@ -1059,7 +1059,7 @@ class OverpassQLParser:
                 break
 
     def _parse_around_filter(self) -> None:
-        """Parse around filter with radius and coordinates."""
+        """Parse around filter with radius and coordinates, or parameterless around."""
         if self.match(TokenType.COLON):
             self.advance()
 
@@ -1075,9 +1075,14 @@ class OverpassQLParser:
                 except ValueError:
                     self.error(f"Invalid radius: {radius.value}")
 
-            # Parse coordinates (lat,lng or multiple points)
-            self.expect(TokenType.COMMA)
-            self._parse_around_coordinates()
+            # Parse coordinates (lat,lng or multiple points) - optional for some
+            # around filters
+            if self.match(TokenType.COMMA):
+                self.advance()
+                self._parse_around_coordinates()
+            # else: parameterless around filter (uses default coordinates)
+        # else: around filter without explicit parameters (uses context-dependent
+        # coordinates)
 
     def _parse_around_set_filter(self, set_name: Token) -> None:
         """Parse around filter with set reference like around.setname:distance."""
@@ -1122,8 +1127,8 @@ class OverpassQLParser:
                 self.advance()  # Skip area ID
 
     def _parse_set_name(self) -> bool:
-        """Parse a set name, which can be an identifier or keyword."""
-        if self.match(
+        """Parse a set name, which can be an identifier, keyword, or setting name."""
+        valid_set_name_tokens = (
             TokenType.IDENTIFIER,
             TokenType.AREA,
             TokenType.NODE,
@@ -1131,7 +1136,15 @@ class OverpassQLParser:
             TokenType.REL,
             TokenType.RELATION,
             TokenType.OUT,
-        ):
+            # Allow setting tokens to be used as set names
+            TokenType.SETTING_DIFF,
+            TokenType.SETTING_ADIFF,
+            TokenType.SETTING_TIMEOUT,
+            TokenType.SETTING_MAXSIZE,
+            TokenType.SETTING_BBOX,
+            TokenType.SETTING_DATE,
+        )
+        if self.match(*valid_set_name_tokens):
             self.advance()
             return True
         return False
@@ -1428,13 +1441,13 @@ class OverpassQLParser:
         if query_type.type == TokenType.AREA and self.match(TokenType.LPAREN):
             return self._parse_area_lookup_statement()
 
-        # Handle input set prefix (e.g., node.setname)
-        if self.match(TokenType.DOT):
+        # Handle input set prefix (e.g., node.setname or node.set1.set2 for
+        # intersection)
+        while self.match(TokenType.DOT):
             self.advance()
-            if not self.match(TokenType.IDENTIFIER):
+            if not self._parse_set_name():
                 self.error("Expected set name after '.'")
-            else:
-                self.advance()
+                break
 
         # Parse filters
         while self.match(TokenType.LBRACKET, TokenType.LPAREN):
@@ -1457,26 +1470,49 @@ class OverpassQLParser:
         self.expect(TokenType.SEMICOLON)
         return True
 
+    def _parse_area_direct_ids(self) -> None:
+        """Parse direct area IDs like area(3600062484, 123456)."""
+        self.advance()  # Skip first number
+        # Check for additional comma-separated IDs
+        while self.match(TokenType.COMMA):
+            self.advance()
+            if self.match(TokenType.NUMBER):
+                self.advance()
+            else:
+                self.error("Expected number after comma in area ID list")
+
+    def _parse_area_named_parameter(self) -> None:
+        """Parse named area parameters like area(id:123) or area(name:"value")."""
+        param_name = self.advance()
+
+        if param_name.value.lower() == "id" and self.match(TokenType.COLON):
+            self.advance()  # Skip :
+            self._parse_id_list_filter()
+        elif self.match(TokenType.COLON):
+            # Other parameter types like name:, etc.
+            self.advance()  # Skip :
+            if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
+                self.advance()
+        else:
+            self.error(f"Expected ':' after area parameter '{param_name.value}'")
+
     def _parse_area_lookup_statement(self) -> bool:
-        """Parse area lookup statement like area(id:123,456,789);"""
+        """Parse area lookup statement like area(id:123,456,789) or area(123456);"""
         self.expect(TokenType.LPAREN)
 
-        # Parse area parameters (id:123,456 or name or other filters)
-        if self.match(TokenType.IDENTIFIER):
-            param_name = self.advance()
-
-            if param_name.value.lower() == "id" and self.match(TokenType.COLON):
-                self.advance()  # Skip :
-                self._parse_id_list_filter()
-            elif self.match(TokenType.COLON):
-                # Other parameter types like name:, etc.
-                self.advance()  # Skip :
-                if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):
-                    self.advance()
-            else:
-                self.error(f"Expected ':' after area parameter '{param_name.value}'")
+        # Parse area parameters - support both direct IDs and named parameters
+        if self.match(TokenType.NUMBER):
+            self._parse_area_direct_ids()
+        elif self.match(TokenType.IDENTIFIER):
+            self._parse_area_named_parameter()
+        elif self.match(TokenType.TEMPLATE_PLACEHOLDER):
+            # Handle template placeholders in area lookups
+            self.advance()
         else:
-            self.error("Expected area parameter (like 'id')")
+            self.error(
+                "Expected area parameter (like 'id'), direct area ID number, "
+                "or template placeholder"
+            )
 
         self.expect(TokenType.RPAREN)
 
@@ -1590,6 +1626,9 @@ class OverpassQLParser:
             if self.match(TokenType.MINUS):
                 # Difference operation (-.setname or -statement)
                 self.advance()
+                # Parse the statement to subtract
+                if not self._parse_union_member():
+                    break
                 continue
 
             # Parse individual statement (could be a set reference, query, etc.)
