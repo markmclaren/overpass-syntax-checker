@@ -88,8 +88,8 @@ def test_more_queries():
 
     print(f"\n{'=' * 60}")
     print(
-        f"SUMMARY: {valid_queries}/{total_queries} queries are now valid ({
-            100 * valid_queries / total_queries:.1f}%)"
+        f"SUMMARY: {valid_queries}/{total_queries} queries are now valid "
+        f"({100 * valid_queries / total_queries:.1f}%)"
     )
     print(f"{'=' * 60}")
 
