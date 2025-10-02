@@ -26,7 +26,7 @@ def analyze_queries():
 
     error_patterns = {}
 
-    for i, query in enumerate(queries[:20]):  # Analyze first 20 queries
+    for i, query in enumerate(queries[:30]):  # Analyze first 30 queries
         print(f"\n--- Query {i+1} ---")
         print(f"Query: {query[:100]}{'...' if len(query) > 100 else ''}")
 

@@ -100,6 +100,7 @@ class TokenType(Enum):
     MINUS = "-"
     MULTIPLY = "*"
     DIVIDE = "/"
+    QUESTION = "?"
 
     # Settings
     SETTING_TIMEOUT = "timeout"
@@ -451,6 +452,7 @@ class OverpassQLLexer:
             "+": TokenType.PLUS,
             "*": TokenType.MULTIPLY,
             "/": TokenType.DIVIDE,
+            "?": TokenType.QUESTION,
         }
 
         if char in token_map:
@@ -527,21 +529,29 @@ class OverpassQLLexer:
                         if len(dates) == 2:
                             # Validate both dates
                             for date in dates:
-                                if not re.match(
-                                    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date
-                                ):
+                                # Accept template placeholders like {{date:7 days}}
+                                # Accept both colons and hyphens in time part (common
+                                # variation)
+                                iso_pattern = (
+                                    r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
+                                )
+                                if not (re.match(iso_pattern, date) or "{{" in date):
                                     self.error(
                                         f"Invalid date format in changed filter: {date}"
                                     )
                             return True
 
                     # Single date format
-                    elif not re.match(
-                        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_value
-                    ):
-                        self.error(
-                            f"Invalid date format in changed filter: {date_value}"
-                        )
+                    # Accept template placeholders like {{date:7 days}}
+                    # Accept both colons and hyphens in time part (common variation)
+                    else:
+                        iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
+                        if not (
+                            re.match(iso_pattern, date_value) or "{{" in date_value
+                        ):
+                            self.error(
+                                f"Invalid date format in changed filter: {date_value}"
+                            )
 
                     return True
         return False
@@ -647,7 +657,7 @@ class OverpassQLParser:
     """Parser for Overpass QL syntax checking."""
 
     # Valid output formats
-    OUTPUT_FORMATS = {"xml", "json", "csv", "custom", "popup", "opl"}
+    OUTPUT_FORMATS = {"xml", "json", "csv", "custom", "popup", "opl", "pbf"}
 
     # Valid out statement modes
     OUT_MODES = {"ids", "skel", "body", "tags", "meta"}
@@ -739,6 +749,24 @@ class OverpassQLParser:
         """Check if current token matches any of the given types."""
         return self.current_token().type in token_types
 
+    def _is_keyword_token(self) -> bool:
+        """Check if current token is a keyword that can be used as an identifier."""
+        # Keywords that can be used as set names or identifiers in certain contexts
+        keyword_types = {
+            TokenType.SETTING_DIFF,
+            TokenType.SETTING_ADIFF,
+            TokenType.SETTING_DATE,
+            TokenType.NODE,
+            TokenType.WAY,
+            TokenType.REL,
+            TokenType.RELATION,
+            TokenType.AREA,
+            TokenType.OUT,
+            TokenType.MAKE,
+            TokenType.CONVERT,
+        }
+        return self.current_token().type in keyword_types
+
     def _parse_timeout_maxsize_setting(self, setting_token: Token) -> None:
         """Parse timeout or maxsize settings."""
         self.expect(TokenType.COLON)
@@ -803,8 +831,10 @@ class OverpassQLParser:
             self.error(f"Expected date string after {setting_token.value}:")
         else:
             date_str = self.advance()
-            # Basic ISO 8601 date format validation
-            if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", date_str.value):
+            # Basic ISO 8601 date format validation - also accept template placeholders
+            # Accept both colons and hyphens in time part (common variation)
+            iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
+            if not (re.match(iso_pattern, date_str.value) or "{{" in date_str.value):
                 self.error("Invalid date format. Expected YYYY-MM-DDTHH:MM:SSZ")
 
     def _parse_unknown_setting(self, setting_token: Token) -> None:
@@ -916,10 +946,31 @@ class OverpassQLParser:
     ) -> None:
         """Validate regex pattern and parse optional flag."""
         if op_token.type in {TokenType.REGEX_OP, TokenType.NOT_REGEX_OP}:
+            # Be more permissive with regex validation since Overpass QL
+            # may use different regex syntax than Python
             try:
-                re.compile(value_token.value)
+                # Only do basic validation - check for completely malformed patterns
+                pattern = value_token.value
+                # Skip validation if pattern contains @ symbol (Overpass-specific
+                # syntax)
+                if "@" not in pattern and not pattern.strip().endswith("|"):
+                    re.compile(pattern)
             except re.error as e:
-                self.error(f"Invalid regex pattern: {e}")
+                # Error on severe regex issues
+                error_str = str(e)
+                if any(
+                    keyword in error_str
+                    for keyword in [
+                        "nothing to repeat",
+                        "bad escape",
+                        "unterminated character set",
+                        "unbalanced parenthesis",
+                    ]
+                ):
+                    self.error(f"Invalid regex pattern: {e}")
+                # Warn but don't error on other regex issues
+                else:
+                    self.warning(f"Regex pattern may have issues: {e}")
 
             # Check for case insensitive flag for regex
             if op_token.type in {TokenType.REGEX_OP, TokenType.NOT_REGEX_OP}:
@@ -961,8 +1012,10 @@ class OverpassQLParser:
 
         first_date = self.advance()
 
-        # Validate date format
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", first_date.value):
+        # Validate date format - also accept template placeholders
+        # Accept both colons and hyphens in time part (common variation)
+        iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
+        if not (re.match(iso_pattern, first_date.value) or "{{" in first_date.value):
             self.error(f"Invalid date format in changed filter: {first_date.value}")
 
         # Check for second date (range)
@@ -975,9 +1028,11 @@ class OverpassQLParser:
 
             second_date = self.advance()
 
-            # Validate second date format
-            if not re.match(
-                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
+            # Validate second date format - also accept template placeholders
+            # Accept both colons and hyphens in time part (common variation)
+            iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}[-:]\d{2}Z$"
+            if not (
+                re.match(iso_pattern, second_date.value) or "{{" in second_date.value
             ):
                 self.error(
                     f"Invalid date format in changed filter: {second_date.value}"
@@ -1044,22 +1099,32 @@ class OverpassQLParser:
 
     def _parse_around_coordinates(self) -> None:
         """Parse coordinates for around filter."""
+        # Special case: {{center}} template placeholder represents a lat,lng pair
+        if self.match(TokenType.TEMPLATE_PLACEHOLDER):
+            placeholder = self.current_token().value
+            if "center" in placeholder.lower():
+                self.advance()  # Skip the {{center}} placeholder
+                return
+
         # Parse at least one coordinate pair
         for coord_idx in range(2):  # lat, lng
             if coord_idx > 0:
                 self.expect(TokenType.COMMA)
 
-            if not self.match(TokenType.NUMBER):
+            # Accept both numbers and template placeholders like {{center}}
+            if not self.match(TokenType.NUMBER, TokenType.TEMPLATE_PLACEHOLDER):
                 coord_type = "latitude" if coord_idx == 0 else "longitude"
                 self.error(f"Expected {coord_type}")
             else:
                 coord = self.advance()
-                self._validate_coordinate(coord, coord_idx)
+                # Only validate if it's a number (skip template placeholders)
+                if coord.type == TokenType.NUMBER:
+                    self._validate_coordinate(coord, coord_idx)
 
         # Check for additional coordinate pairs (linestring)
         while self.match(TokenType.COMMA):
             self.advance()
-            if self.match(TokenType.NUMBER):
+            if self.match(TokenType.NUMBER, TokenType.TEMPLATE_PLACEHOLDER):
                 self.advance()  # Additional coordinates
             else:
                 break
@@ -1681,29 +1746,7 @@ class OverpassQLParser:
         """Parse a member of a union statement."""
         # Handle set references like ._ or .setname
         if self.match(TokenType.DOT):
-            self.advance()
-            if self.match(TokenType.IDENTIFIER):
-                self.advance()
-            else:
-                self.error("Expected set name after '.'")
-                return False
-
-            # Handle assignment after set reference (e.g., ._ -> .result)
-            if self.match(TokenType.ASSIGN):
-                self.advance()
-                if not self.match(TokenType.DOT):
-                    self.error("Expected '.' after '->' in assignment")
-                    return False
-                self.advance()
-                if not self.match(TokenType.IDENTIFIER):
-                    self.error("Expected set name after '.'")
-                    return False
-                self.advance()
-
-            # Expect semicolon after set reference
-            if self.match(TokenType.SEMICOLON):
-                self.advance()
-            return True
+            return self._parse_union_set_reference()
         # Handle recursion operators like >, >>, <, <<
         elif self.match(
             TokenType.RECURSE_DOWN,
@@ -1711,13 +1754,78 @@ class OverpassQLParser:
             TokenType.RECURSE_UP,
             TokenType.RECURSE_UP_REL,
         ):
-            self.advance()
-            if self.match(TokenType.SEMICOLON):
-                self.advance()
-            return True
+            return self._parse_union_recursion_operator()
         # Handle regular statements
         else:
             return self.parse_statement()
+
+    def _parse_union_set_reference(self) -> bool:
+        """Parse a set reference in a union member (.setname with operations)."""
+        self.advance()  # Skip DOT
+        # Accept identifiers or keywords as set names
+        if not self._parse_set_name():
+            self.error("Expected set name after '.'")
+            return False
+
+        # Handle operations after set reference
+        if self.match(TokenType.MAP_TO_AREA):
+            self._parse_union_map_to_area_operation()
+        elif self.match(
+            TokenType.RECURSE_DOWN,
+            TokenType.RECURSE_DOWN_REL,
+            TokenType.RECURSE_UP,
+            TokenType.RECURSE_UP_REL,
+        ):
+            self._parse_union_recursion_operation()
+        elif self.match(TokenType.ASSIGN):
+            if not self._parse_union_assignment():
+                return False
+
+        # Expect semicolon after set reference
+        if self.match(TokenType.SEMICOLON):
+            self.advance()
+        return True
+
+    def _parse_union_recursion_operator(self) -> bool:
+        """Parse standalone recursion operators in union."""
+        self.advance()  # Skip recursion operator
+        if self.match(TokenType.SEMICOLON):
+            self.advance()
+        return True
+
+    def _parse_union_map_to_area_operation(self) -> None:
+        """Parse map_to_area operation after set reference."""
+        self.advance()  # Skip map_to_area
+        # Handle optional assignment to set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if not self._parse_set_name():
+                    self.error("Expected set name after '->'")
+
+    def _parse_union_recursion_operation(self) -> None:
+        """Parse recursion operation after set reference."""
+        self.advance()  # Skip recursion operator
+        # Handle optional assignment to set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if not self._parse_set_name():
+                    self.error("Expected set name after '->'")
+
+    def _parse_union_assignment(self) -> bool:
+        """Parse assignment after set reference (._ -> .result)."""
+        self.advance()  # Skip ASSIGN
+        if not self.match(TokenType.DOT):
+            self.error("Expected '.' after '->' in assignment")
+            return False
+        self.advance()
+        if not self._parse_set_name():
+            self.error("Expected set name after '.'")
+            return False
+        return True
 
     def _parse_block_set_specifications(self) -> None:
         """Parse input/output set specifications for block statements."""
@@ -1933,23 +2041,60 @@ class OverpassQLParser:
         return False
 
     def _parse_set_reference(self) -> bool:
-        """Parse set reference (.setname;)."""
+        """Parse set reference (.setname;) with optional operations."""
         if self.match(TokenType.DOT):
             self.advance()
-            if not self.match(TokenType.IDENTIFIER):
+            if not self._parse_set_name():
                 self.error("Expected set name after '.'")
-            else:
-                self.advance()
+                return False
 
-            self.expect(TokenType.SEMICOLON)
+            # Handle operations after set reference
+            if self.match(
+                TokenType.RECURSE_DOWN,
+                TokenType.RECURSE_DOWN_REL,
+                TokenType.RECURSE_UP,
+                TokenType.RECURSE_UP_REL,
+            ):
+                self._parse_set_reference_recursion_operation()
+            elif self.match(TokenType.MAP_TO_AREA):
+                self._parse_set_reference_map_to_area_operation()
+
+            self._expect_optional_semicolon()
             return True
         return False
+
+    def _parse_set_reference_recursion_operation(self) -> None:
+        """Parse recursion operation after set reference."""
+        self.advance()  # Skip recursion operator
+        # Handle optional assignment to set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if not self._parse_set_name():
+                    self.error("Expected set name after '->'")
+
+    def _parse_set_reference_map_to_area_operation(self) -> None:
+        """Parse map_to_area operation after set reference."""
+        self.advance()  # Skip map_to_area
+        # Handle optional assignment to set
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if self.match(TokenType.DOT):
+                self.advance()
+                if not self._parse_set_name():
+                    self.error("Expected set name after '->'")
 
     def parse_simple_statement(self):
         """Parse simple statements like recursion operators, is_in, etc."""
         # Handle template placeholders as standalone statements
         if self.match(TokenType.TEMPLATE_PLACEHOLDER):
             return self._parse_template_placeholder_statement()
+
+        # Handle convert statements
+        if self.match(TokenType.CONVERT):
+            self._parse_convert_statement()
+            return True
 
         # Handle make statements
         if self.match(TokenType.MAKE):
@@ -2139,6 +2284,56 @@ class OverpassQLParser:
             return self.tokens[pos]
         return None
 
+    def _parse_convert_statement(self) -> None:
+        """Parse convert statement."""
+        self.advance()  # Skip 'convert' token
+
+        # Convert statements can have various formats:
+        # convert geometry ::id=id()
+        # convert row ::id=id(),...
+        # convert item
+
+        # First part can be 'geometry', 'row', 'item', or other identifiers
+        if self.match(TokenType.IDENTIFIER):
+            self.advance()  # Skip the convert type
+
+        # Parse assignment patterns
+        self._parse_convert_assignments()
+        self.expect(TokenType.SEMICOLON)
+
+    def _parse_convert_assignments(self) -> None:
+        """Parse assignment patterns in convert statements."""
+        while self.match(TokenType.IDENTIFIER):
+            self.advance()  # Skip identifier
+
+            if self.match(TokenType.ASSIGN):
+                self.advance()  # Skip =
+                self._parse_convert_assignment_value()
+
+            # Skip comma if present
+            if self.match(TokenType.COMMA):
+                self.advance()
+
+    def _parse_convert_assignment_value(self) -> None:
+        """Parse the value part of a convert assignment."""
+        if self.match(TokenType.IDENTIFIER):
+            self.advance()  # Skip function name
+            if self.match(TokenType.LPAREN):
+                self._parse_parentheses_content()
+        elif self.match(TokenType.STRING, TokenType.NUMBER):
+            self.advance()
+
+    def _parse_parentheses_content(self) -> None:
+        """Parse content inside parentheses, handling nested parentheses."""
+        self.advance()  # Skip opening (
+        paren_count = 1
+        while paren_count > 0 and not self.match(TokenType.EOF):
+            if self.match(TokenType.LPAREN):
+                paren_count += 1
+            elif self.match(TokenType.RPAREN):
+                paren_count -= 1
+            self.advance()
+
     def _parse_map_to_area_statement(self) -> None:
         """Parse map_to_area statement."""
         self.advance()  # Skip 'map_to_area' token
@@ -2157,22 +2352,42 @@ class OverpassQLParser:
 
     def _is_set_reference_out_statement(self) -> bool:
         """Check if current position is a set reference followed by out."""
+        peek1 = self.peek_token(1)
+        peek2 = self.peek_token(2)
         return (
             self.match(TokenType.DOT)
-            and self.peek_token(1)
-            and self.peek_token(1).type == TokenType.IDENTIFIER
-            and self.peek_token(2)
-            and self.peek_token(2).type == TokenType.OUT
+            and peek1
+            and (peek1.type == TokenType.IDENTIFIER or self._is_keyword_token_at(1))
+            and peek2
+            and peek2.type == TokenType.OUT
         )
+
+    def _is_keyword_token_at(self, offset: int) -> bool:
+        """Check if token at offset is a keyword that can be used as identifier."""
+        token = self.peek_token(offset)
+        if not token:
+            return False
+        keyword_types = {
+            TokenType.SETTING_DIFF,
+            TokenType.SETTING_ADIFF,
+            TokenType.SETTING_DATE,
+            TokenType.NODE,
+            TokenType.WAY,
+            TokenType.REL,
+            TokenType.RELATION,
+            TokenType.AREA,
+            TokenType.OUT,
+            TokenType.MAKE,
+            TokenType.CONVERT,
+        }
+        return token.type in keyword_types
 
     def _parse_set_reference_out(self) -> bool:
         """Parse set reference followed by out statement."""
         self.advance()  # Skip .
-        if not self.match(TokenType.IDENTIFIER):
+        if not self._parse_set_name():
             self.error("Expected set name after '.'")
             return False
-        else:
-            self.advance()  # Skip set name
         # Now parse the out statement
         return self.parse_out_statement()
 
@@ -2232,12 +2447,23 @@ class OverpassQLParser:
         ].type in {TokenType.COMMENT, TokenType.NEWLINE}:
             first_non_comment += 1
 
-        # Check if first statement is settings
+        # Check for template assignments at the very start
         if (
             first_non_comment < len(self.tokens)
-            and self.tokens[first_non_comment].type == TokenType.LBRACKET
+            and self.tokens[first_non_comment].type == TokenType.TEMPLATE_PLACEHOLDER
         ):
             self.pos = first_non_comment
+            template_token = self.tokens[self.pos]
+            if "=" in template_token.value:
+                # Parse template assignment
+                self.advance()
+                # Continue to parse settings/statements after template assignment
+
+        # Check if first statement is settings
+        if (
+            self.pos < len(self.tokens)
+            and self.tokens[self.pos].type == TokenType.LBRACKET
+        ):
             self.parse_settings()
 
         # Parse remaining statements
