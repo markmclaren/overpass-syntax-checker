@@ -56,6 +56,29 @@ You can also install directly from the repository:
 pip install git+https://github.com/markmclaren/overpass-syntax-checker.git
 ```
 
+### Troubleshooting Installation
+
+If the `overpass-ql-check` command is not found after installation:
+
+1. **Check if it's in your PATH:**
+   ```bash
+   which overpass-ql-check
+   ```
+
+2. **Use the module directly:**
+   ```bash
+   python -m overpass_ql_checker.cli --test
+   ```
+
+3. **Reinstall to refresh console scripts:**
+   ```bash
+   pip uninstall overpass-ql-checker
+   pip install overpass-ql-checker  # or your preferred installation method
+   ```
+
+4. **Check your Python environment:**
+   Make sure you're installing in the same environment where you want to use it.
+
 ### Requirements
 
 - Python 3.7 or higher
