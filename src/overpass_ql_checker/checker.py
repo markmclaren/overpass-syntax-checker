@@ -83,6 +83,7 @@ class TokenType(Enum):
     NOT_OP = "!"
     EQUALS = "="
     NOT_EQUALS = "!="
+    NOT_REGEX_OP = "!~"
 
     # Settings
     SETTING_TIMEOUT = "timeout"
@@ -408,6 +409,13 @@ class OverpassQLLexer:
             self.advance()
             self.tokens.append(
                 Token(TokenType.NOT_EQUALS, "!=", start_line, start_column)
+            )
+            return True
+        elif char == "!" and self.peek(1) == "~":
+            self.advance()
+            self.advance()
+            self.tokens.append(
+                Token(TokenType.NOT_REGEX_OP, "!~", start_line, start_column)
             )
             return True
         return False
@@ -881,14 +889,14 @@ class OverpassQLParser:
         self, op_token: Token, value_token: Token
     ) -> None:
         """Validate regex pattern and parse optional flag."""
-        if op_token.type == TokenType.REGEX_OP:
+        if op_token.type in {TokenType.REGEX_OP, TokenType.NOT_REGEX_OP}:
             try:
                 re.compile(value_token.value)
             except re.error as e:
                 self.error(f"Invalid regex pattern: {e}")
 
             # Check for case insensitive flag for regex
-            if op_token.type == TokenType.REGEX_OP:
+            if op_token.type in {TokenType.REGEX_OP, TokenType.NOT_REGEX_OP}:
                 self._parse_regex_flag()
 
     def _parse_key_value_pattern(self) -> None:
@@ -902,7 +910,12 @@ class OverpassQLParser:
             return
 
         # Check for operator
-        if self.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.REGEX_OP):
+        if self.match(
+            TokenType.EQUALS,
+            TokenType.NOT_EQUALS,
+            TokenType.REGEX_OP,
+            TokenType.NOT_REGEX_OP,
+        ):
             op_token = self.advance()
 
             # Parse value
