@@ -37,7 +37,7 @@ class TestOverpassQLSyntaxChecker:
     def test_simple_invalid_queries(self):
         """Test simple invalid queries."""
         invalid_queries = [
-            "node[amenity=restaurant]",  # Missing semicolon
+            "node[amenity restaurant];out;",  # Missing equals in tag filter
             "node[;out;",  # Malformed tag filter
             "way[highway=primary](invalid);out;",  # Invalid spatial filter
         ]
@@ -155,15 +155,15 @@ class TestOverpassQLSyntaxChecker:
 
     def test_error_reporting(self):
         """Test that error messages are helpful."""
-        invalid_query = "node[amenity=restaurant]"  # Missing semicolon
+        invalid_query = "node[amenity restaurant];out;"  # Missing equals in tag filter
         result = self.checker.check_syntax(invalid_query)
 
         assert not result["valid"]
         assert len(result["errors"]) > 0
         assert any(
-            "semicolon" in error.lower() or "expected" in error.lower()
+            "expected" in error.lower() or "tag" in error.lower()
             for error in result["errors"]
-        ), "Error should mention missing semicolon"
+        ), "Error should mention expected token or tag filter issue"
 
     def test_warning_system(self):
         """Test that warnings are generated appropriately."""

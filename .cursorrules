@@ -1,0 +1,252 @@
+# Overpass QL Syntax Checker - Development Instructions
+
+## Project Overview
+
+This is a Python library for validating Overpass Query Language (OverpassQL) syntax. It includes a lexer, parser, and comprehensive test suite for checking OpenStreetMap Overpass API queries.
+
+## Critical Development Environment Setup
+
+### Virtual Environment
+
+- **ALWAYS** use the virtual environment when running Python commands
+- Virtual environment location: `.venv/`
+- Activation command: `source .venv/bin/activate`
+- **Remember**: All Python commands (python, pip, pytest) must be run within the activated virtual environment
+
+### Python Command Usage
+
+- Use `python` (not `python3`) when virtual environment is activated
+- When virtual environment is NOT activated, use `python3`
+- The virtual environment contains all required dependencies including pytest
+
+## Project Structure
+
+```
+overpass-syntax-checker/
+├── src/
+│   └── overpass_ql_checker/
+│       ├── __init__.py
+│       ├── checker.py      # Main syntax checker implementation
+│       └── cli.py          # Command-line interface
+├── tests/                  # ALL test files go here
+│   ├── test_*.py          # Pytest test files
+│   ├── debug_*.py         # Debug/utility scripts
+│   └── check_*.py         # Manual test scripts
+├── examples/
+├── .venv/                 # Virtual environment (DO NOT MODIFY)
+├── invalid_queries.txt    # Sample invalid queries for testing
+├── test.sh               # Main test runner script
+└── pyproject.toml        # Project configuration
+```
+
+## Development Guidelines
+
+### Code Quality Standards
+
+#### Line Length & Formatting
+
+- **Maximum line length: 88 characters** (Black formatter standard)
+- Use Black formatter for consistent code style
+- Run `./quality.sh` to check code quality before commits
+- Break long lines at logical points (after commas, operators, etc.)
+
+#### Python Version Compatibility
+
+- **Target Python 3.8+** for maximum compatibility
+- **String handling for Python < 3.12**:
+  - Avoid f-strings in error messages that might be interpolated
+  - Use explicit `.format()` or `%` formatting for complex strings
+  - Be careful with raw strings and escape sequences
+  - Test string tokenization thoroughly across Python versions
+
+#### Complexity Management
+
+- **Keep functions under 15-20 lines when possible**
+- **Cyclomatic complexity should be < 10** per function
+- **Break down complex parsing methods**:
+  - Split large `_parse_*` methods into smaller helpers
+  - Use early returns to reduce nesting
+  - Extract common validation patterns
+- **Limit nested control structures** (max 3-4 levels)
+
+#### Error Handling & String Safety
+
+- **Always handle unterminated strings gracefully**
+- **Provide clear error messages with line/column info**
+- **Use proper escaping for regex patterns**
+- **Validate input before processing**
+
+#### Code Organization
+
+1. **All test files must be in `tests/` directory**
+2. **Import paths from tests**: Use `sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))`
+3. **Test function naming**:
+   - Pytest test functions: `def test_*()`
+   - Utility functions: `def check_*()` or `def verify_*()`
+
+### Testing
+
+- Main test command: `./test.sh` (handles virtual environment automatically)
+- Manual pytest: `source .venv/bin/activate && python -m pytest tests/ -v`
+- Individual test files can be run directly: `python tests/test_focused.py`
+
+### Parser Development Context
+
+- The checker implements optional semicolons for many Overpass QL constructs
+- Template placeholders like `{{bbox}}`, `{{geocodeArea:"name"}}` are supported
+- Advanced constructs supported: `for(user())`, CSV outputs, conditional filters
+- Set operations with underscore (`nwr._`) are valid
+- Many queries that seem "invalid" are actually valid in real Overpass QL
+
+### Key Classes
+
+- `OverpassQLSyntaxChecker`: Main public API
+- `OverpassQLLexer`: Tokenizes Overpass QL source
+- `OverpassQLParser`: Parses token stream and validates syntax
+- `ValidationResult`: Contains validation results with errors/warnings
+
+### CLI Usage
+
+- Command: `overpass-ql-check "query" --verbose`
+- Must be run with virtual environment activated
+
+## Common Commands (Remember: use virtual environment!)
+
+```bash
+# Activate virtual environment FIRST
+source .venv/bin/activate
+
+# Run full test suite
+./test.sh
+
+# Run code quality checks
+./quality.sh  # Includes flake8, black, complexity checks
+
+# Run specific tests
+python -m pytest tests/test_overpass_checker.py -v
+
+# Test CLI
+overpass-ql-check "node[amenity=restaurant];out;" --verbose
+
+# Run utility scripts
+python tests/test_focused.py
+python tests/test_all_invalid.py
+
+# Check syntax improvements
+python tests/test_invalid_samples.py
+
+# Manual quality checks
+python -m flake8 src/ tests/ --max-line-length=88
+python -m black --check src/ tests/
+python -m mccabe --min=5 src/overpass_ql_checker/checker.py
+```
+
+## Code Quality Checklist
+
+Before committing code, ensure:
+
+- ✅ **Line length < 88 characters**
+- ✅ **All strings properly terminated and escaped**
+- ✅ **Functions have reasonable complexity (< 10 cyclomatic)**
+- ✅ **Error handling for edge cases (empty input, malformed queries)**
+- ✅ **Python 3.8+ compatibility maintained**
+- ✅ **Tests pass**: `./test.sh`
+- ✅ **Quality checks pass**: `./quality.sh`
+- ✅ **No unterminated string literals or regex patterns**
+
+## Error Patterns to Avoid
+
+### ❌ Don't Do This
+
+```bash
+# Running without virtual environment
+python3 -m pytest tests/
+# ERROR: No module named pytest
+
+# Wrong import paths in test files
+sys.path.insert(0, "src")  # Missing ".." for tests/ subdirectory
+```
+
+```python
+# Long, complex functions (bad)
+def parse_complex_statement(self):
+    if self.match(TokenType.NODE):
+        if self.match(TokenType.LBRACKET):
+            while not self.match(TokenType.RBRACKET):
+                if self.match(TokenType.STRING):
+                    # ... 50+ lines of nested logic
+
+# Unterminated string handling (bad for Python < 3.12)
+def read_string(self):
+    value = f"Reading string at {self.pos}"  # Could fail if self.pos is complex
+    while self.peek() != '"':
+        value += self.advance()  # No termination check!
+    return value
+
+# Complex regex without validation (bad)
+pattern = r'[a-zA-Z][a-zA-Z0-9_]*'  # Unescaped, could cause issues
+```
+
+### ✅ Do This Instead
+
+```bash
+# Always activate virtual environment first
+source .venv/bin/activate
+python -m pytest tests/
+
+# Correct import paths in test files
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+```
+
+```python
+# Break down complex functions (good)
+def parse_complex_statement(self):
+    if self.match(TokenType.NODE):
+        return self._parse_node_statement()
+    return False
+
+def _parse_node_statement(self):
+    """Handle node statement parsing."""
+    if self.match(TokenType.LBRACKET):
+        return self._parse_node_filters()
+    return self._parse_simple_node()
+
+# Safe string handling (good for all Python versions)
+def read_string(self):
+    """Read a string literal with proper termination checking."""
+    value = ""
+    start_pos = self.pos
+
+    while self.peek() and self.peek() != '"':
+        if self.pos - start_pos > 1000:  # Prevent runaway parsing
+            self.error("String too long")
+        value += self.advance()
+
+    if not self.peek():
+        self.error("Unterminated string literal")
+    return value
+
+# Safe regex with validation (good)
+try:
+    pattern = re.compile(r'[a-zA-Z][a-zA-Z0-9_]*')
+except re.error as e:
+    self.error(f"Invalid regex pattern: {e}")
+```
+
+## Recent Improvements Made
+
+- Made semicolons optional for template statements and simple expressions
+- Added support for `{{bbox=area:ID}}` template assignments
+- Enhanced `for(user())` and `for(t["key"])` statement parsing
+- Improved CSV output format support in settings
+- Added advanced query constructs (set operations, conditional filters)
+- ~30% of previously invalid queries are now correctly recognized as valid
+
+## File Naming Conventions
+
+- `test_*.py`: Official pytest test files (run by test suite)
+- `debug_*.py`: Debug/development utilities (not run by pytest)
+- `check_*.py`: Manual verification scripts (not run by pytest)
+- Helper functions in test files should NOT be named `test_*` to avoid pytest conflicts
+
+Remember: The virtual environment is your friend! Always activate it first. 🐍
