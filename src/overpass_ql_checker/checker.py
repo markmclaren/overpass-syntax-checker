@@ -1099,6 +1099,36 @@ class OverpassQLParser:
             if self.match(TokenType.STRING):
                 self.advance()
 
+    def _parse_changed_filter_spatial(self) -> None:
+        """Parse changed filter with date range in spatial context."""
+        self.advance()  # Skip :
+
+        if not self.match(TokenType.STRING):
+            self.error("Expected date string after 'changed:'")
+            return
+
+        first_date = self.advance()
+        # Validate date format
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", first_date.value):
+            self.error(f"Invalid date format in changed filter: {first_date.value}")
+
+        # Check for second date (range)
+        if self.match(TokenType.COMMA):
+            self.advance()  # Skip comma
+
+            if not self.match(TokenType.STRING):
+                self.error("Expected second date string after comma in changed filter")
+                return
+
+            second_date = self.advance()
+            # Validate second date format
+            if not re.match(
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
+            ):
+                self.error(
+                    f"Invalid date format in changed filter: {second_date.value}"
+                )
+
     def _parse_other_named_filters(self, filter_name: str) -> None:
         """Parse other named spatial filters."""
         # Define valid spatial filter identifiers
@@ -1126,6 +1156,9 @@ class OverpassQLParser:
         # Handle member filters (w, r, bn, bw, br)
         if filter_name in {"w", "r", "bn", "bw", "br"}:
             self._parse_member_filters(filter_name)
+        # Handle special case for changed filter with date range
+        elif filter_name.lower() == "changed" and self.match(TokenType.COLON):
+            self._parse_changed_filter_spatial()
         # Handle other filters with parameters
         elif self.match(TokenType.COLON):
             self.advance()
@@ -1187,6 +1220,40 @@ class OverpassQLParser:
 
             if filter_name.value.lower() == "id":
                 self._parse_id_list_filter()
+            elif filter_name.value.lower() == "changed":
+                # Handle changed filter with date range: changed:"date1","date2"
+                if not self.match(TokenType.STRING):
+                    self.error("Expected date string after 'changed:'")
+                    return
+
+                first_date = self.advance()
+                # Validate date format
+                if not re.match(
+                    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", first_date.value
+                ):
+                    self.error(
+                        f"Invalid date format in changed filter: {first_date.value}"
+                    )
+
+                # Check for second date (range)
+                if self.match(TokenType.COMMA):
+                    self.advance()  # Skip comma
+
+                    if not self.match(TokenType.STRING):
+                        self.error(
+                            "Expected second date string after comma in changed filter"
+                        )
+                        return
+
+                    second_date = self.advance()
+                    # Validate second date format
+                    if not re.match(
+                        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", second_date.value
+                    ):
+                        self.error(
+                            f"Invalid date format in changed filter: {
+                                second_date.value}"
+                        )
             else:
                 # Other filters like newer:"date", user:"name", uid:123
                 if self.match(TokenType.STRING, TokenType.NUMBER, TokenType.IDENTIFIER):

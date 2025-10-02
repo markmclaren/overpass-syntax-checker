@@ -37,6 +37,7 @@ def main():
     args = parser.parse_args()
 
     checker = OverpassQLSyntaxChecker()
+    query = None
 
     if args.file:
         try:
@@ -53,6 +54,11 @@ def main():
     else:
         print("Error: Please provide a query string or file.")
         parser.print_help()
+        sys.exit(1)
+
+    # This should never be None at this point, but just in case
+    if query is None:
+        print("Error: No query to process.")
         sys.exit(1)
 
     is_valid = checker.validate_query(query, verbose=args.verbose)

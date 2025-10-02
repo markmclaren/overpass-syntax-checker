@@ -445,6 +445,13 @@ This project uses several code quality tools with convenient scripts:
 - **`./quality.sh`**: Runs all quality checks (same as CI pipeline)
 - **`./quality-fix.sh`**: Automatically fixes code formatting issues
 - **`./test.sh`**: Runs the comprehensive test suite
+- **`./coverage.sh`**: Runs test coverage analysis with detailed reports
+
+**Coverage script options:**
+
+- `./coverage.sh` - Full coverage analysis with HTML and XML reports
+- `./coverage.sh --quick` - Quick terminal coverage report only
+- `./coverage.sh --help` - Show coverage script usage
 
 **Individual tools:**
 
