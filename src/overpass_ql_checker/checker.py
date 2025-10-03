@@ -2005,6 +2005,7 @@ class OverpassQLParser:
             TokenType.FOR,
             TokenType.RETRO,
             TokenType.COMPARE,
+            TokenType.COMPLETE,
         }:
             if self.match(TokenType.LPAREN):
                 self.advance()
@@ -2015,6 +2016,12 @@ class OverpassQLParser:
                 elif block_type.type == TokenType.IF:
                     # Parse condition expression for if statements
                     self._parse_condition_expression()
+                elif block_type.type == TokenType.COMPLETE:
+                    # Parse numeric parameter for complete statements
+                    if self.match(TokenType.NUMBER):
+                        self.advance()
+                    else:
+                        self.error("Expected number in complete statement parameters")
                 else:
                     # Parse evaluator expression (simplified for other blocks)
                     while not self.match(TokenType.RPAREN, TokenType.EOF):
@@ -2458,7 +2465,8 @@ class OverpassQLParser:
         self.advance()  # Skip 'make'
 
         # Parse identifier (can contain backslashes like stat_highway_\1)
-        if not self.match(TokenType.IDENTIFIER):
+        # Allow keywords to be used as identifiers in make statements
+        if not (self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0)):
             self.error("Expected identifier after 'make'")
             return
         self.advance()
@@ -2516,6 +2524,19 @@ class OverpassQLParser:
         """Parse value expression in make statement."""
         self._parse_make_ternary_expression()
 
+        # Handle assignment after value expression (e.g.,
+        # result.set(t["name"])->.blacklist)
+        if self.match(TokenType.ASSIGN):
+            self.advance()  # Skip ->
+            if self.match(TokenType.DOT):
+                self.advance()  # Skip .
+                if self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
+                    self.advance()  # Skip set name
+                else:
+                    self.error("Expected set name after '.' in assignment")
+            else:
+                self.error("Expected '.' after '->' in assignment")
+
     def _parse_make_ternary_expression(self) -> None:
         """Parse ternary expressions (condition ? true_value : false_value)."""
         self._parse_make_comparison_expression()
@@ -2564,37 +2585,11 @@ class OverpassQLParser:
     def _parse_make_primary_expression(self) -> None:
         """Parse primary expressions (function calls, identifiers, numbers, strings)."""
         # Handle function calls like count(ways), length(sum(length()))
-        if (
-            self.match(TokenType.IDENTIFIER)
-            and self.peek_ahead(1)
-            and self.peek_ahead(1).type == TokenType.LPAREN
-        ):
-            self.advance()  # Function name
-            self.expect(TokenType.LPAREN)
-
-            # Parse function arguments (can be nested)
-            if not self.match(TokenType.RPAREN):
-                self._parse_make_function_args()
-
-            self.expect(TokenType.RPAREN)
-        # Handle complex expressions like _.val
-        elif self.match(TokenType.IDENTIFIER):
-            self.advance()
-            # Handle tag access like t["key"]
-            if self.match(TokenType.LBRACKET):
-                self.advance()  # Skip [
-                if self.match(TokenType.STRING):
-                    self.advance()  # Skip string key
-                else:
-                    self.error("Expected string key in tag access")
-                self.expect(TokenType.RBRACKET)
-            # Handle dotted access like _.val
-            elif self.match(TokenType.DOT):
-                self.advance()
-                if self.match(TokenType.IDENTIFIER):
-                    self.advance()
-                else:
-                    self.error("Expected identifier after '.' in expression")
+        if self._is_function_call():
+            self._parse_make_function_call()
+        # Handle complex expressions like _.val and keyword tokens like nwr, ways, etc.
+        elif self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
+            self._parse_make_identifier_expression()
         # Handle simple values
         elif self.match(TokenType.NUMBER, TokenType.STRING):
             self.advance()
@@ -2605,6 +2600,59 @@ class OverpassQLParser:
             self.expect(TokenType.RPAREN)
         else:
             self.error("Expected value expression in make statement")
+
+    def _is_function_call(self) -> bool:
+        """Check if current position is a function call."""
+        return (
+            (self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0))
+            and self.peek_ahead(1)
+            and self.peek_ahead(1).type == TokenType.LPAREN
+        )
+
+    def _parse_make_function_call(self) -> None:
+        """Parse function call in make expression."""
+        self.advance()  # Function name
+        self.expect(TokenType.LPAREN)
+
+        # Parse function arguments (can be nested)
+        if not self.match(TokenType.RPAREN):
+            self._parse_make_function_args()
+
+        self.expect(TokenType.RPAREN)
+
+    def _parse_make_identifier_expression(self) -> None:
+        """Parse identifier with optional tag access or dotted access."""
+        self.advance()
+        # Handle tag access like t["key"]
+        if self.match(TokenType.LBRACKET):
+            self._parse_make_tag_access()
+        # Handle dotted access like _.val or method calls like result.set(t["name"])
+        elif self.match(TokenType.DOT):
+            self._parse_make_dotted_access()
+
+    def _parse_make_tag_access(self) -> None:
+        """Parse tag access like t["key"]."""
+        self.advance()  # Skip [
+        if self.match(TokenType.STRING):
+            self.advance()  # Skip string key
+        else:
+            self.error("Expected string key in tag access")
+        self.expect(TokenType.RBRACKET)
+
+    def _parse_make_dotted_access(self) -> None:
+        """Parse dotted access like _.val or method calls like result.set(t["name"])."""
+        self.advance()
+        if self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
+            self.advance()
+            # Check if this is a method call (followed by parentheses)
+            if self.match(TokenType.LPAREN):
+                self.advance()  # Skip (
+                # Parse method arguments if any
+                if not self.match(TokenType.RPAREN):
+                    self._parse_make_function_args()
+                self.expect(TokenType.RPAREN)
+        else:
+            self.error("Expected identifier after '.' in expression")
 
     def _parse_make_function_args(self) -> None:
         """Parse function arguments in make statement."""
@@ -2632,9 +2680,10 @@ class OverpassQLParser:
         # convert geometry ::id=id()
         # convert row ::id=id(),...
         # convert item
+        # convert rel ::id=id()
 
-        # First part can be 'geometry', 'row', 'item', or other identifiers
-        if self.match(TokenType.IDENTIFIER):
+        # First part can be 'geometry', 'row', 'item', 'rel', or other identifiers
+        if self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
             self.advance()  # Skip the convert type
 
         # Parse assignment patterns
@@ -2657,26 +2706,49 @@ class OverpassQLParser:
 
     def _parse_convert_single_assignment(self) -> None:
         """Parse a single assignment in a convert statement."""
-        # Handle ::id syntax or ::=id() syntax
+        # Handle ::id syntax or regular identifier
         if self.match(TokenType.COLON):
             self.advance()  # Skip first :
             if self.match(TokenType.COLON):
                 self.advance()  # Skip second :
-                # Handle ::= syntax (double colon equals)
-                if self.match(TokenType.EQUALS):
-                    self.advance()  # Skip =
-                    # Parse value expression after ::=
-                    self._parse_convert_assignment_value()
+                # Expect identifier after ::
+                if self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
+                    self.advance()  # Skip identifier
+                else:
+                    self.error("Expected identifier after '::'")
                     return
             else:
-                # Single colon, rewind
-                self.pos -= 1
-
-        # Parse the identifier
-        if not self.match(TokenType.IDENTIFIER):
-            self.error("Expected identifier in convert assignment")
+                # Single colon, rewind and treat as error
+                self.error("Expected second ':' in :: pattern")
+                return
+        elif self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
+            # Parse regular identifier
+            self.advance()  # Skip identifier
+        else:
+            self.error("Expected identifier or '::' in convert assignment")
             return
-        self.advance()  # Skip identifier
+
+        # Parse equals
+        if self.match(TokenType.EQUALS):
+            self.advance()  # Skip =
+            # Parse value expression after =
+            self._parse_convert_assignment_value()
+
+    def _parse_convert_function_args(self) -> None:
+        """Parse function arguments in convert assignment."""
+        while True:
+            # Simple argument parsing for now
+            if self.match(
+                TokenType.IDENTIFIER, TokenType.NUMBER, TokenType.STRING
+            ) or self._is_keyword_token_at(0):
+                self.advance()
+            else:
+                break
+
+            if self.match(TokenType.COMMA):
+                self.advance()
+            else:
+                break
 
         # Expect equals sign
         if not self.match(TokenType.EQUALS):
@@ -2719,6 +2791,37 @@ class OverpassQLParser:
 
         self.expect(TokenType.SEMICOLON)
 
+    def _is_set_reference_assignment_statement(self) -> bool:
+        """Check if current position is a set reference followed by assignment."""
+        peek1 = self.peek_token(1)
+        peek2 = self.peek_token(2)
+        return (
+            self.match(TokenType.DOT)
+            and peek1
+            and (peek1.type == TokenType.IDENTIFIER or self._is_keyword_token_at(1))
+            and peek2
+            and peek2.type == TokenType.ASSIGN
+        )
+
+    def _parse_set_reference_assignment(self) -> bool:
+        """Parse set reference followed by assignment statement."""
+        self.advance()  # Skip .
+        if not self._parse_set_name():
+            self.error("Expected set name after '.'")
+            return False
+        # Parse assignment
+        if self.match(TokenType.ASSIGN):
+            self.advance()
+            if not self.match(TokenType.DOT):
+                self.error("Expected '.' after '->' in assignment")
+                return False
+            self.advance()
+            if not self._parse_set_name():
+                self.error("Expected set name after '.'")
+                return False
+        self._expect_optional_semicolon()
+        return True
+
     def _is_set_reference_out_statement(self) -> bool:
         """Check if current position is a set reference followed by out."""
         peek1 = self.peek_token(1)
@@ -2744,6 +2847,10 @@ class OverpassQLParser:
             TokenType.WAY,
             TokenType.REL,
             TokenType.RELATION,
+            TokenType.NWR,
+            TokenType.NW,
+            TokenType.NR,
+            TokenType.WR,
             TokenType.AREA,
             TokenType.OUT,
             TokenType.MAKE,
@@ -2783,24 +2890,54 @@ class OverpassQLParser:
             return False
 
         # Try different statement types
+        return self._try_parse_statement_types()
+
+    def _try_parse_statement_types(self) -> bool:
+        """Try to parse different statement types in order."""
+        # Try set reference statements first (most specific)
+        if self._try_parse_set_reference_statements():
+            return True
+
+        # Try standard query statements
+        if self._try_parse_query_statements():
+            return True
+
+        # Try other statement types
+        if self._try_parse_other_statements():
+            return True
+
+        # No valid statement found
+        self.error(f"Unexpected token: {self.current_token().value}")
+        self.advance()  # Skip the unexpected token
+        return False
+
+    def _try_parse_set_reference_statements(self) -> bool:
+        """Try to parse set reference statements."""
         if self._is_set_reference_out_statement():
             return self._parse_set_reference_out()
-        elif self.parse_query_statement():
+        elif self._is_set_reference_assignment_statement():
+            return self._parse_set_reference_assignment()
+        return False
+
+    def _try_parse_query_statements(self) -> bool:
+        """Try to parse query statements."""
+        if self.parse_query_statement():
             return True
         elif self.parse_out_statement():
             return True
         elif self.parse_union_statement():
             return True
-        elif self.parse_block_statement():
+        return False
+
+    def _try_parse_other_statements(self) -> bool:
+        """Try to parse other statement types."""
+        if self.parse_block_statement():
             return True
         elif self.parse_simple_statement():
             return True
         elif self._parse_standalone_recursion():
             return True
-        else:
-            self.error(f"Unexpected token: {self.current_token().value}")
-            self.advance()  # Skip the unexpected token
-            return False
+        return False
 
     def parse(self) -> Tuple[List[str], List[str]]:
         """Parse the entire query and return errors and warnings."""
