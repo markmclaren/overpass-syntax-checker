@@ -1019,29 +1019,10 @@ class OverpassQLParser:
         if op_token.type in {TokenType.REGEX_OP, TokenType.NOT_REGEX_OP}:
             # Be more permissive with regex validation since Overpass QL
             # may use different regex syntax than Python
-            try:
-                # Only do basic validation - check for completely malformed patterns
-                pattern = value_token.value
-                # Skip validation if pattern contains @ symbol (Overpass-specific
-                # syntax)
-                if "@" not in pattern and not pattern.strip().endswith("|"):
-                    re.compile(pattern)
-            except re.error as e:
-                # Error on severe regex issues
-                error_str = str(e)
-                if any(
-                    keyword in error_str
-                    for keyword in [
-                        "nothing to repeat",
-                        "bad escape",
-                        "unterminated character set",
-                        "unbalanced parenthesis",
-                    ]
-                ):
-                    self.error(f"Invalid regex pattern: {e}")
-                # Warn but don't error on other regex issues
-                else:
-                    self.warning(f"Regex pattern may have issues: {e}")
+            pattern = value_token.value
+            # Skip validation if pattern contains @ symbol (Overpass-specific syntax)
+            if "@" not in pattern and not pattern.strip().endswith("|"):
+                self._validate_regex_pattern(pattern, "Invalid regex pattern")
 
             # Check for case insensitive flag for regex
             if op_token.type in {TokenType.REGEX_OP, TokenType.NOT_REGEX_OP}:
@@ -1117,10 +1098,7 @@ class OverpassQLParser:
             self.error("Expected regex pattern after ~")
         else:
             key_regex = self.advance()
-            try:
-                re.compile(key_regex.value)
-            except re.error as e:
-                self.error(f"Invalid key regex pattern: {e}")
+            self._validate_regex_pattern(key_regex.value, "Invalid key regex pattern")
 
         if self.match(TokenType.REGEX_OP):
             self.advance()  # Skip second ~
@@ -1129,13 +1107,32 @@ class OverpassQLParser:
                 self.error("Expected value regex pattern after second ~")
             else:
                 value_regex = self.advance()
-                try:
-                    re.compile(value_regex.value)
-                except re.error as e:
-                    self.error(f"Invalid value regex pattern: {e}")
+                self._validate_regex_pattern(
+                    value_regex.value, "Invalid value regex pattern"
+                )
 
             # Check for case insensitive flag
             self._parse_regex_flag()
+
+    def _validate_regex_pattern(self, pattern: str, error_prefix: str) -> None:
+        """Validate a regex pattern with permissive error handling."""
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            # Be more permissive with regex patterns
+            error_str = str(e)
+            severe_errors = [
+                "nothing to repeat",
+                "bad escape",
+                "unterminated character set",
+            ]
+
+            if any(keyword in error_str for keyword in severe_errors):
+                self.error(f"{error_prefix}: {e}")
+            elif "unbalanced parenthesis" in error_str:
+                self.warning(f"{error_prefix} may have unbalanced parentheses: {e}")
+            else:
+                self.warning(f"{error_prefix} may have issues: {e}")
 
     def parse_tag_filter(self):
         """Parse tag filter [key] or [key=value] or [key~regex]."""
@@ -1170,13 +1167,14 @@ class OverpassQLParser:
 
     def _parse_around_coordinates(self) -> None:
         """Parse coordinates for around filter."""
-        # Special case: {{center}} and {{geocodeCoords:...}} template placeholders
-        # represent a lat,lng pair
+        # Special case: template placeholders represent coordinate data
+        # {{center}}, {{geocodeCoords:...}}, {{bbox}}
         if self.match(TokenType.TEMPLATE_PLACEHOLDER):
             placeholder = self.current_token().value
             if (
                 "center" in placeholder.lower()
                 or "geocodecoords" in placeholder.lower()
+                or "bbox" in placeholder.lower()
             ):
                 self.advance()  # Skip the template placeholder
                 return
@@ -1325,8 +1323,16 @@ class OverpassQLParser:
                 self.advance()
         if self.match(TokenType.COLON):
             self.advance()
-            if self.match(TokenType.STRING):
+            # Handle both string roles and numeric IDs (including negative numbers)
+            if self.match(TokenType.STRING, TokenType.NUMBER):
                 self.advance()
+                # Handle comma-separated IDs for member filters like w:-1,1
+                while self.match(TokenType.COMMA):
+                    self.advance()  # Skip comma
+                    if self.match(TokenType.NUMBER):
+                        self.advance()  # Skip number
+                    else:
+                        break
 
     def _parse_changed_filter_spatial(self) -> None:
         """Parse changed filter with date range in spatial context."""
@@ -2593,6 +2599,14 @@ class OverpassQLParser:
         # Handle simple values
         elif self.match(TokenType.NUMBER, TokenType.STRING):
             self.advance()
+        # Handle :: syntax in convert statements
+        elif self.match(TokenType.COLON):
+            # Check for :: pattern
+            if self.peek_ahead(1) and self.peek_ahead(1).type == TokenType.COLON:
+                self.advance()  # Skip first :
+                self.advance()  # Skip second :
+            else:
+                self.error("Expected value expression in make statement")
         # Handle parenthesized expressions
         elif self.match(TokenType.LPAREN):
             self.advance()  # Skip (
@@ -2706,16 +2720,20 @@ class OverpassQLParser:
 
     def _parse_convert_single_assignment(self) -> None:
         """Parse a single assignment in a convert statement."""
-        # Handle ::id syntax or regular identifier
+        # Handle ::id syntax, ::= syntax, or regular identifier
         if self.match(TokenType.COLON):
             self.advance()  # Skip first :
             if self.match(TokenType.COLON):
                 self.advance()  # Skip second :
-                # Expect identifier after ::
-                if self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
+                # Check if we have ::= pattern (no identifier between :: and =)
+                if self.match(TokenType.EQUALS):
+                    # This is ::= pattern, proceed to parse equals
+                    pass
+                # Or if we have ::identifier= pattern
+                elif self.match(TokenType.IDENTIFIER) or self._is_keyword_token_at(0):
                     self.advance()  # Skip identifier
                 else:
-                    self.error("Expected identifier after '::'")
+                    self.error("Expected identifier or '=' after '::'")
                     return
             else:
                 # Single colon, rewind and treat as error
